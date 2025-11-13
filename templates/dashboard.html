@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Sistema de Predicción</title>
+    
+    <!-- Tailwind CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #0f172a;
+            background-image: radial-gradient(circle at 25% 25%, rgba(59,130,246,0.15), transparent 40%),
+                              radial-gradient(circle at 75% 75%, rgba(139,92,246,0.15), transparent 40%);
+            color: #f1f5f9;
+        }
+
+        header {
+            background: rgba(30,41,59,0.7);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+        }
+
+        .glass-card {
+            background: linear-gradient(145deg, rgba(30,41,59,0.85), rgba(15,23,42,0.85));
+            backdrop-filter: blur(15px);
+            border-radius: 1.25rem;
+            border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            transition: all 0.3s ease;
+            text-align: left;
+        }
+
+        .glass-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(96,165,250,0.3);
+        }
+
+        .glass-card h3 {
+            color: #e2e8f0;
+        }
+
+        .glass-card p {
+            color: rgba(255,255,255,0.7);
+        }
+
+        .card-icon {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 1rem;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 10px rgba(96,165,250,0.1);
+        }
+
+        .logo-container {
+            position: relative;
+            display: inline-block;
+        }
+
+        .logo-container img {
+            width: 3.5rem;
+            height: 3.5rem;
+            border-radius: 50%;
+            object-fit: contain;
+            box-shadow: 0 0 15px rgba(96,165,250,0.4);
+        }
+
+        footer {
+            background: rgba(30,41,59,0.8);
+            backdrop-filter: blur(10px);
+            color: rgba(203,213,225,0.8);
+        }
+
+        .logout-btn {
+            background: linear-gradient(90deg, #ef4444, #dc2626);
+            border-radius: 9999px;
+            color: #fff;
+            transition: all 0.3s ease;
+        }
+
+        .logout-btn:hover {
+            background: linear-gradient(90deg, #f87171, #ef4444);
+            transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(239,68,68,0.4);
+        }
+
+        h1, h2 {
+            background: linear-gradient(90deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="py-4 px-6 flex justify-between items-center">
+        <div class="flex items-center gap-3">
+            <div class="logo-container">
+                <img src="{{ url_for('static', filename='imagen.png') }}" alt="Logo Rosa">
+            </div>
+            <div>
+                <h1 class="text-2xl font-bold">Sistema de Predicción</h1>
+                <p class="text-gray-400 text-sm">Producción de Rosas</p>
+            </div>
+        </div>
+
+        <a href="/logout" class="logout-btn py-2 px-4 flex items-center shadow-md">
+            <i class="fas fa-sign-out-alt mr-2"></i> Cerrar sesión
+        </a>
+    </header>
+
+    <!-- Main -->
+    <main class="flex-grow flex flex-col items-center justify-center py-10 px-6">
+        <h2 class="text-2xl font-semibold mb-8 text-center">BIENVENIDO AL SISTEMA DE DATOS DE PRODUCCIÓN</h2>
+
+        <!-- GRID -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto">
+
+            <a href="/produccion" class="glass-card p-6">
+                <div class="flex items-center mb-4">
+                    <div class="card-icon mr-4"><i class="fas fa-seedling text-2xl text-blue-400"></i></div>
+                    <h3 class="text-lg font-semibold">Datos Producción de Rosas</h3>
+                </div>
+                <p>Histórico de producción de rosas por variedad.</p>
+                <div class="mt-4 text-blue-400 font-medium flex items-center justify-between">
+                    <span>Ver producción</span><i class="fas fa-arrow-right"></i>
+                </div>
+            </a>
+
+            <a href="/prediccion_tabla" class="glass-card p-6">
+                <div class="flex items-center mb-4">
+                    <div class="card-icon mr-4"><i class="fas fa-seedling text-2xl text-blue-400"></i></div>
+                    <h3 class="text-lg font-semibold">Prediccion semana a semana</h3>
+                </div>
+                <p>Tabla de predicciones para 8 semanas.</p>
+                <div class="mt-4 text-blue-400 font-medium flex items-center justify-between">
+                    <span>Ver tabla</span><i class="fas fa-arrow-right"></i>
+                </div>
+            </a>
+
+            <a href="/prediccion_grafica" class="glass-card p-6">
+                <div class="flex items-center mb-4">
+                    <div class="card-icon mr-4"><i class="fas fa-seedling text-2xl text-blue-400"></i></div>
+                    <h3 class="text-lg font-semibold">Prediccion general 6 meses y 1 año</h3>
+                </div>
+                <p>predicción de producción de rosas general.</p>
+                <div class="mt-4 text-blue-400 font-medium flex items-center justify-between">
+                    <span>Ver tabla</span><i class="fas fa-arrow-right"></i>
+                </div>
+            </a>
+
+            <a href="/produccion_dos" class="glass-card p-6">
+                <div class="flex items-center mb-4">
+                    <div class="card-icon mr-4"><i class="fas fa-seedling text-2xl text-blue-400"></i></div>
+                    <h3 class="text-lg font-semibold">Comparacion de prediccion</h3>
+                </div>
+                <p>comparativa con datos reales.</p>
+                <div class="mt-4 text-blue-400 font-medium flex items-center justify-between">
+                    <span>Ver tabla</span><i class="fas fa-arrow-right"></i>
+                </div>
+            </a>
+
+            <a href="/prediccion_tabla_dos" class="glass-card p-6">
+                <div class="flex items-center mb-4">
+                    <div class="card-icon mr-4"><i class="fas fa-file-alt text-2xl text-blue-400"></i></div>
+                    <h3 class="text-lg font-semibold">Resumen semana a semana </h3>
+                </div>
+                <p>Resumen en dashboard.</p>
+                <div class="mt-4 text-blue-400 font-medium flex items-center justify-between">
+                    <span>Ver Informe</span><i class="fas fa-arrow-right"></i>
+                </div>
+            </a>
+
+            <a href="/resumen_dos" class="glass-card p-6">
+                <div class="flex items-center mb-4">
+                    <div class="card-icon mr-4"><i class="fas fa-file-alt text-2xl text-blue-400"></i></div>
+                    <h3 class="text-lg font-semibold">Resumen general</h3>
+                </div>
+                <p>Resumen dashboard.</p>
+                <div class="mt-4 text-blue-400 font-medium flex items-center justify-between">
+                    <span>Ver informe</span><i class="fas fa-arrow-right"></i>
+                </div>
+            </a>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="py-6 text-center text-sm">
+        &copy; 2025 Sistema de Predicción de Producción de Rosas. Todos los derechos reservados - Samuel Torres (3202865714)
+    </footer>
+
+</body>
+</html>
+
+
+
+

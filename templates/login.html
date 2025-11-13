@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Ingreso a la App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Tailwind CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #0f172a;
+            background-image: radial-gradient(circle at 20% 30%, rgba(37,99,235,0.15), transparent 50%),
+                              radial-gradient(circle at 80% 70%, rgba(168,85,247,0.15), transparent 50%);
+            color: #f1f5f9;
+        }
+
+        .glass-card {
+            background: linear-gradient(145deg, rgba(30,41,59,0.85), rgba(15,23,42,0.85));
+            backdrop-filter: blur(20px);
+            border-radius: 1.5rem;
+            border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 4px 30px rgba(0,0,0,0.5);
+        }
+
+        .input-glass {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: #e2e8f0;
+        }
+
+        .input-glass::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        .input-glass:focus {
+            outline: none;
+            border-color: #60a5fa;
+            box-shadow: 0 0 10px rgba(96,165,250,0.5);
+        }
+
+        .btn-glass {
+            background: linear-gradient(90deg, #175bc8, #8b5cf6);
+            color: #fff;
+            font-weight: 600;
+            border-radius: 9999px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-glass:hover {
+            transform: scale(1.03);
+            box-shadow: 0 0 15px rgba(95, 40, 223, 0.5);
+        }
+
+        label {
+            color: #94a3b8;
+        }
+
+        .title {
+            background: linear-gradient(90deg, #2f64a5, #9e86e5);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .error-box {
+            background: rgba(239,68,68,0.15);
+            border-left: 4px solid #ef4444;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-6">
+
+    <div class="glass-card p-8 w-full max-w-md text-center">
+        <!-- LOGO -->
+        <div class="flex justify-center mb-6">
+            <img src="{{ url_for('static', filename='imagen.png') }}" alt="Logo Rosa" class="w-28 h-28 rounded-full shadow-lg ring-2 ring-blue-400">
+        </div>
+
+        <!-- TITULO -->
+        <h1 class="text-2xl font-bold title mb-1">INGRESO ADMINISTRATIVO</h1>
+        <p class="text-gray-400 text-sm mb-6">PREDICCIÓN DE PRODUCCIÓN DE ROSAS</p>
+
+        {% if error %}
+            <div class="error-box text-red-300 px-4 py-3 rounded mb-4 text-left">
+                <i class="fas fa-exclamation-triangle mr-2"></i> {{ error }}
+            </div>
+        {% endif %}
+
+        <form method="post" class="space-y-5 text-left">
+            <!-- Campo Usuario -->
+            <div>
+                <label for="usuario" class="block font-medium mb-1">Usuario</label>
+                <div class="relative">
+                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-blue-400">
+                        <i class="fas fa-user"></i>
+                    </span>
+                    <input type="text" name="usuario" id="usuario" placeholder="Ingrese su usuario"
+                        class="input-glass w-full pl-10 pr-4 py-3 rounded-lg"
+                        required>
+                </div>
+            </div>
+
+            <!-- Campo Contraseña -->
+            <div>
+                <label for="clave" class="block font-medium mb-1">Contraseña</label>
+                <div class="relative">
+                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-purple-400">
+                        <i class="fas fa-key"></i>
+                    </span>
+                    <input type="password" name="clave" id="clave" placeholder="Ingrese su contraseña"
+                        class="input-glass w-full pl-10 pr-4 py-3 rounded-lg"
+                        required>
+                </div>
+            </div>
+
+            <!-- Botón -->
+            <button type="submit" class="btn-glass w-full py-3 mt-4 shadow-md">
+                <i class="fas fa-sign-in-alt mr-2"></i> INGRESAR
+            </button>
+        </form>
+    </div>
+
+</body>
+</html>
+
+

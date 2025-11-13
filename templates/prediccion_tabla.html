@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Predicción de Producción Semana a Semana</title>
+
+    <!-- Tailwind + Poppins -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- DataTables -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #0f172a;
+            background-image: radial-gradient(circle at 25% 25%, rgba(59,130,246,0.15), transparent 40%),
+                              radial-gradient(circle at 75% 75%, rgba(139,92,246,0.15), transparent 40%);
+            color: #f1f5f9;
+        }
+
+        header {
+            background: rgba(30,41,59,0.7);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+        }
+
+        h1 {
+            background: linear-gradient(90deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 700;
+        }
+
+        .container-custom {
+            background: linear-gradient(145deg, rgba(30,41,59,0.85), rgba(15,23,42,0.85));
+            backdrop-filter: blur(15px);
+            border-radius: 1.25rem;
+            border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            padding: 2.5rem;
+            margin: 3rem auto;
+            max-width: 1300px;
+        }
+
+        .dataTables_wrapper {
+            color: #f1f5f9 !important;
+        }
+
+        table.dataTable {
+            border-collapse: collapse !important;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            box-shadow: 0 0 15px rgba(96,165,250,0.1);
+            background: rgba(255,255,255,0.03);
+        }
+
+        table.dataTable thead {
+            background: rgba(59,130,246,0.15);
+        }
+
+        table.dataTable th {
+            color: #93c5fd !important;
+            font-weight: 600;
+            text-transform: uppercase;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            text-align: center;
+        }
+
+        table.dataTable tbody td {
+            color: #e2e8f0;
+            text-align: center;
+            padding: 10px 12px;
+        }
+
+        table.dataTable tbody tr:nth-child(even) {
+            background: rgba(255,255,255,0.05);
+        }
+
+        table.dataTable tbody tr:hover {
+            background: rgba(96,165,250,0.1);
+            transition: 0.3s ease;
+        }
+
+        .dataTables_filter input {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.15);
+            color: #e2e8f0;
+            border-radius: 0.5rem;
+            padding: 5px 10px;
+        }
+
+        .dataTables_paginate a {
+            color: #93c5fd !important;
+        }
+
+        .dataTables_paginate a.current {
+            background: linear-gradient(90deg, #60a5fa, #a78bfa);
+            border-radius: 6px;
+            color: white !important;
+        }
+
+        .dataTables_info {
+            color: rgba(203,213,225,0.8);
+        }
+
+        .dt-buttons button {
+            background: linear-gradient(90deg, #60a5fa, #a78bfa);
+            border: none;
+            color: white;
+            border-radius: 9999px;
+            padding: 6px 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            margin-right: 6px;
+        }
+
+        .dt-buttons button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 12px rgba(96,165,250,0.4);
+        }
+
+        .logout-btn {
+            background: linear-gradient(90deg, #ef4444, #dc2626);
+            border-radius: 9999px;
+            color: #fff;
+            transition: all 0.3s ease;
+        }
+
+        .logout-btn:hover {
+            background: linear-gradient(90deg, #f87171, #ef4444);
+            transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(239,68,68,0.4);
+        }
+
+        footer {
+            background: rgba(30,41,59,0.8);
+            backdrop-filter: blur(10px);
+            color: rgba(203,213,225,0.8);
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+    </style>
+</head>
+
+<body class="min-h-screen flex flex-col">
+
+    <!-- HEADER -->
+    <header class="py-4 px-6 flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold">📊 Predicción de Producción Semana a Semana</h1>
+            <p class="text-gray-400 text-sm">Predicciones para las próximas 8 semanas</p>
+        </div>
+
+        <a href="{{ url_for('dashboard') }}" class="logout-btn py-2 px-4 flex items-center shadow-md">
+            <i class="fas fa-arrow-left mr-2"></i> Volver
+        </a>
+    </header>
+
+    <!-- CONTENIDO -->
+    <main class="flex-grow py-10 px-6">
+        <div class="container-custom">
+            
+            {% for variedad, datos in tabla_semanal.items() %}
+                <h2 class="text-xl font-semibold mb-3 text-blue-400">{{ variedad }}</h2>
+                <div class="table-responsive mb-10">
+                    <table class="display stripe hover w-full">
+                        <thead>
+                            <tr>
+                                <th>SEMANA</th>
+                                <th>HW (Clima)</th>
+                                <th>LSTM (IA)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for fila in datos %}
+                            <tr>
+                                <td>{{ fila.SEMANA }}</td>
+                                <td>{{ fila.HW }}</td>
+                                <td>{{ fila.LSTM }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endfor %}
+        </div>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="py-6 text-center text-sm">
+        &copy; 2025 Sistema de Predicción de Producción de Rosas. Todos los derechos reservados - Samuel Torres.
+    </footer>
+
+    <!-- JS -->
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.print.min.js"></script>
+
+    <script>
+        $(document).ready(function () {
+            $('table.display').DataTable({
+                dom: 'Bfrtip',
+                buttons: ['excelHtml5', 'csvHtml5', 'print'],
+                pageLength: 8,
+                language: {
+                    search: "🔍 Buscar:",
+                    lengthMenu: "Mostrar _MENU_ filas",
+                    info: "Mostrando _START_ a _END_ de _TOTAL_ entradas",
+                    paginate: {
+                        first: "Primero",
+                        last: "Último",
+                        next: "Siguiente",
+                        previous: "Anterior"
+                    }
+                }
+            });
+        });
+    </script>
+
+</body>
+</html>
+
+
+
+
