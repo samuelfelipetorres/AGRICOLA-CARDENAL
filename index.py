@@ -155,24 +155,23 @@ def produccion_dos():
     if 'usuario' not in session:
         return redirect(url_for('login'))
 
-    # === 1. Leer Excel principal y preparar datos para ENTRENAMIENTO ===
+    # === 1. Leer Excel principal ===
     df = pd.read_excel("produccion.xlsx")
     
-    # Crear columna FECHA
     df["FECHA"] = pd.to_datetime(
         df["AÑO"].astype(str) + df["SEMANA"].astype(str) + "1",
         format="%G%V%w", errors="coerce"
     )
 
-    # --- CORRECCIÓN: Identificar el último año COMPLETO para entrenar ---
+    # Identificar año de predicción (último año del excel)
     año_actual_incompleto = df["AÑO"].max()
     año_max_entrenamiento = año_actual_incompleto - 1
 
+    # Entrenamiento = últimos 5 años completos
     df_entrenamiento = df[df["AÑO"] <= año_max_entrenamiento]
-
     df_entrenamiento = df_entrenamiento[df_entrenamiento["AÑO"] >= año_max_entrenamiento - 4]
 
-    # === 1b. Leer Excel de datos reales del año a predecir ===
+    # === 1b. Leer datos reales ===
     df_reales = pd.read_excel("datos_reales.xlsx")
     df_reales["FECHA"] = pd.to_datetime(
         df_reales["AÑO"].astype(str) + df_reales["SEMANA"].astype(str) + "1",
@@ -180,109 +179,83 @@ def produccion_dos():
     )
     df_reales = df_reales[df_reales["AÑO"] == año_actual_incompleto]
 
-    # === 2. Generar predicciones por variedad y por semana ===
+    # === 2. Predicciones ===
     filas = []
 
     for variedad in df_entrenamiento["VARIEDAD"].unique():
         for semana in range(1, 53):
-            df_sem = df_entrenamiento[(df_entrenamiento["VARIEDAD"] == variedad) & (df_entrenamiento["SEMANA"] == semana)]
+
+            df_sem = df_entrenamiento[
+                (df_entrenamiento["VARIEDAD"] == variedad) &
+                (df_entrenamiento["SEMANA"] == semana)
+            ]
+
             serie_full = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
 
             serie_hw = serie_full[serie_full.index >= año_max_entrenamiento - 1]
-            serie_lr = serie_full[serie_full.index == año_max_entrenamiento]
             serie_lstm = serie_full[serie_full.index >= año_max_entrenamiento - 2]
 
+            # Si hay pocos datos, no predice
             if len(serie_full) < 3:
-                hw = lr = lstm = 0
+                hw = lstm = 0
             else:
-                # --- Promedio simple (2 años) ---
-                try:
-                    if len(serie_hw) > 0:
-                        hw = round(serie_hw.mean(), 2)
-                    else:
-                        hw = 0
-                except:
-                    hw = 0
+                # === HW: promedio 2 años ===
+                hw = round(serie_hw.mean(), 2) if len(serie_hw) > 0 else 0
 
-                # --- Gradient Boosting Regressor (1 año) ---
-                try:
-                    if len(serie_lr) > 1:
-                        X = serie_lr.index.values.reshape(-1, 1)
-                        y = serie_lr.values
-
-                        model_gb = GradientBoostingRegressor(
-                            n_estimators=200,
-                            learning_rate=0.1,
-                            max_depth=3,
-                            random_state=42
-                        )
-                        model_gb.fit(X, y)
-
-                        X_future = np.array([[año_actual_incompleto]])
-                        y_future = model_gb.predict(X_future)
-                        lr = round(y_future[0], 2)
-                    else:
-                        lr = round(serie_lr.mean(), 2) if len(serie_lr) > 0 else 0
-                except:
-                    lr = round(serie_lr.mean(), 2) if len(serie_lr) > 0 else 0
-
-                # === 🔥 LSTM REEMPLAZADO POR PROMEDIO ===
-                try:
-                    if len(serie_lstm) > 0:
-                        lstm = round(serie_lstm.mean(), 2)
-                    else:
-                        lstm = 0
-                except:
-                    lstm = 0
+                # === LSTM reemplazado por promedio 3 años ===
+                lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
 
             # === Valor real ===
-            real_data = df_reales[(df_reales["VARIEDAD"] == variedad) & (df_reales["SEMANA"] == semana)]
-            
-            if not real_data.empty:
-                real = real_data["TALLOS"].sum()
-            else:
-                real = 0
+            real_data = df_reales[
+                (df_reales["VARIEDAD"] == variedad) &
+                (df_reales["SEMANA"] == semana)
+            ]
+
+            real = real_data["TALLOS"].sum() if not real_data.empty else 0
 
             def error_pct(real, pred):
                 if real == 0:
                     return 0 if pred == 0 else 100.0
                 return round(abs(real - pred) / real * 100, 2)
 
-            dif_hw, dif_lr, dif_lstm = real - hw, real - lr, real - lstm
-            acc_hw, acc_lr, acc_lstm = error_pct(real, hw), error_pct(real, lr), error_pct(real, lstm)
+            dif_hw = real - hw
+            dif_lstm = real - lstm
+            acc_hw = error_pct(real, hw)
+            acc_lstm = error_pct(real, lstm)
 
-            filas.append([variedad, semana, hw, lr, lstm, real,
-                          dif_hw, dif_lr, dif_lstm, acc_hw, acc_lr, acc_lstm])
+            filas.append([
+                variedad, semana, hw, lstm, real,
+                dif_hw, dif_lstm, acc_hw, acc_lstm
+            ])
 
     # === 3. DataFrame final ===
     df_pred = pd.DataFrame(filas, columns=[
-        "VARIEDAD", "SEMANA", "HW", "LR", "LSTM", "REAL",
-        "DIF_HW", "DIF_LR", "DIF_LSTM", "ACC_HW", "ACC_LR", "ACC_LSTM"
+        "VARIEDAD", "SEMANA", "HW", "LSTM", "REAL",
+        "DIF_HW", "DIF_LSTM", "ACC_HW", "ACC_LSTM"
     ])
 
-    # === Tabla 1: semana a semana ===
+    # === BLOQUES ===
+    df_pred["BLOQUE"] = ((df_pred["SEMANA"] - 1) // 4) + 1
+
+    # ---------------------------------------------------------
+    # TABLA 1 — Semana a semana
+    # ---------------------------------------------------------
     tabla_semanal = {}
     for variedad in df_pred["VARIEDAD"].unique():
         tabla_semanal[variedad] = df_pred[df_pred["VARIEDAD"] == variedad] \
             .drop(columns="VARIEDAD") \
             .to_dict(orient="records")
 
-    # === Tabla 2: sumas cada 4 semanas por variedad ===
-    df_pred["BLOQUE"] = ((df_pred["SEMANA"] - 1) // 4) + 1
+    # ---------------------------------------------------------
+    # TABLA 2 — Sumas por bloques por variedad
+    # ---------------------------------------------------------
     tabla_variedad_df = df_pred.groupby(["VARIEDAD", "BLOQUE"])[
-        ["HW", "LR", "LSTM", "REAL"]
+        ["HW", "LSTM", "REAL"]
     ].sum().reset_index()
 
-    def error_pct(real, pred):
-        if real == 0:
-            return 0 if pred == 0 else 100.0
-        return round(abs(real - pred) / real * 100, 2)
-
     tabla_variedad_df["DIF_HW"] = tabla_variedad_df["REAL"] - tabla_variedad_df["HW"]
-    tabla_variedad_df["DIF_LR"] = tabla_variedad_df["REAL"] - tabla_variedad_df["LR"]
     tabla_variedad_df["DIF_LSTM"] = tabla_variedad_df["REAL"] - tabla_variedad_df["LSTM"]
     tabla_variedad_df["ACC_HW"] = tabla_variedad_df.apply(lambda x: error_pct(x["REAL"], x["HW"]), axis=1)
-    tabla_variedad_df["ACC_LR"] = tabla_variedad_df.apply(lambda x: error_pct(x["REAL"], x["LR"]), axis=1)
     tabla_variedad_df["ACC_LSTM"] = tabla_variedad_df.apply(lambda x: error_pct(x["REAL"], x["LSTM"]), axis=1)
 
     tabla_variedad = {}
@@ -291,86 +264,98 @@ def produccion_dos():
             .drop(columns="VARIEDAD") \
             .to_dict(orient="records")
 
-    # === Tabla 3: total anual por variedad ===
-    tabla_total = df_pred.groupby("VARIEDAD")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
+    # ---------------------------------------------------------
+    # TABLA 3 — Total anual por variedad
+    # ---------------------------------------------------------
+    tabla_total = df_pred.groupby("VARIEDAD")[["HW", "LSTM", "REAL"]].sum().reset_index()
+
     tabla_total["DIF_HW"] = tabla_total["REAL"] - tabla_total["HW"]
-    tabla_total["DIF_LR"] = tabla_total["REAL"] - tabla_total["LR"]
     tabla_total["DIF_LSTM"] = tabla_total["REAL"] - tabla_total["LSTM"]
     tabla_total["ACC_HW"] = tabla_total.apply(lambda x: error_pct(x["REAL"], x["HW"]), axis=1)
-    tabla_total["ACC_LR"] = tabla_total.apply(lambda x: error_pct(x["REAL"], x["LR"]), axis=1)
     tabla_total["ACC_LSTM"] = tabla_total.apply(lambda x: error_pct(x["REAL"], x["LSTM"]), axis=1)
 
-    # === Tabla 4: total por tipo ===
+    # ---------------------------------------------------------
+    # TABLA 4 — Totales por tipo
+    # ---------------------------------------------------------
     df_excel = pd.read_excel("produccion.xlsx")[["VARIEDAD", "TIPO", "COLOR"]].drop_duplicates()
     df_merge = df_pred.merge(df_excel, on="VARIEDAD", how="left")
-    
-    tabla_tipo = df_merge.groupby("TIPO")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
+
+    tabla_tipo = df_merge.groupby("TIPO")[["HW", "LSTM", "REAL"]].sum().reset_index()
+
     tabla_tipo["DIF_HW"] = tabla_tipo["REAL"] - tabla_tipo["HW"]
-    tabla_tipo["DIF_LR"] = tabla_tipo["REAL"] - tabla_tipo["LR"]
     tabla_tipo["DIF_LSTM"] = tabla_tipo["REAL"] - tabla_tipo["LSTM"]
     tabla_tipo["ACC_HW"] = tabla_tipo.apply(lambda x: error_pct(x["REAL"], x["HW"]), axis=1)
-    tabla_tipo["ACC_LR"] = tabla_tipo.apply(lambda x: error_pct(x["REAL"], x["LR"]), axis=1)
     tabla_tipo["ACC_LSTM"] = tabla_tipo.apply(lambda x: error_pct(x["REAL"], x["LSTM"]), axis=1)
+
     tabla_tipo = tabla_tipo[tabla_tipo["TIPO"].isin(["COLORES", "ROJO"])]
 
-    # === TABLA 5: general semana a semana ===
-    tabla_general_semanal = df_pred.groupby("SEMANA")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
+    # ---------------------------------------------------------
+    # TABLA 5 — General semanal
+    # ---------------------------------------------------------
+    tabla_general_semanal = df_pred.groupby("SEMANA")[["HW", "LSTM", "REAL"]].sum().reset_index()
+
     tabla_general_semanal["DIF_HW"] = tabla_general_semanal["REAL"] - tabla_general_semanal["HW"]
-    tabla_general_semanal["DIF_LR"] = tabla_general_semanal["REAL"] - tabla_general_semanal["LR"]
     tabla_general_semanal["DIF_LSTM"] = tabla_general_semanal["REAL"] - tabla_general_semanal["LSTM"]
     tabla_general_semanal["ACC_HW"] = tabla_general_semanal.apply(lambda x: error_pct(x["REAL"], x["HW"]), axis=1)
-    tabla_general_semanal["ACC_LR"] = tabla_general_semanal.apply(lambda x: error_pct(x["REAL"], x["LR"]), axis=1)
     tabla_general_semanal["ACC_LSTM"] = tabla_general_semanal.apply(lambda x: error_pct(x["REAL"], x["LSTM"]), axis=1)
 
-    # === TABLA 6: general por bloques ===
-    tabla_general_bloques = df_pred.groupby("BLOQUE")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
+    # ---------------------------------------------------------
+    # TABLA 6 — General por bloques
+    # ---------------------------------------------------------
+    tabla_general_bloques = df_pred.groupby("BLOQUE")[["HW", "LSTM", "REAL"]].sum().reset_index()
+
     tabla_general_bloques["DIF_HW"] = tabla_general_bloques["REAL"] - tabla_general_bloques["HW"]
-    tabla_general_bloques["DIF_LR"] = tabla_general_bloques["REAL"] - tabla_general_bloques["LR"]
     tabla_general_bloques["DIF_LSTM"] = tabla_general_bloques["REAL"] - tabla_general_bloques["LSTM"]
     tabla_general_bloques["ACC_HW"] = tabla_general_bloques.apply(lambda x: error_pct(x["REAL"], x["HW"]), axis=1)
-    tabla_general_bloques["ACC_LR"] = tabla_general_bloques.apply(lambda x: error_pct(x["REAL"], x["LR"]), axis=1)
     tabla_general_bloques["ACC_LSTM"] = tabla_general_bloques.apply(lambda x: error_pct(x["REAL"], x["LSTM"]), axis=1)
 
-    # === TABLA 7: solo COLORES ===
+    # ---------------------------------------------------------
+    # TABLA 7 — General COLORES
+    # ---------------------------------------------------------
     df_colores = df_merge[df_merge["TIPO"] == "COLORES"]
-    tabla_general_colores = df_colores.groupby("BLOQUE")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
+
+    tabla_general_colores = df_colores.groupby("BLOQUE")[["HW", "LSTM", "REAL"]].sum().reset_index()
+
     tabla_general_colores["DIF_HW"] = tabla_general_colores["REAL"] - tabla_general_colores["HW"]
-    tabla_general_colores["DIF_LR"] = tabla_general_colores["REAL"] - tabla_general_colores["LR"]
     tabla_general_colores["DIF_LSTM"] = tabla_general_colores["REAL"] - tabla_general_colores["LSTM"]
     tabla_general_colores["ACC_HW"] = tabla_general_colores.apply(lambda x: error_pct(x["REAL"], x["HW"]), axis=1)
-    tabla_general_colores["ACC_LR"] = tabla_general_colores.apply(lambda x: error_pct(x["REAL"], x["LR"]), axis=1)
     tabla_general_colores["ACC_LSTM"] = tabla_general_colores.apply(lambda x: error_pct(x["REAL"], x["LSTM"]), axis=1)
 
-    # === TABLA 8: general total ===
+    # ---------------------------------------------------------
+    # TABLA 8 — General total
+    # ---------------------------------------------------------
     tabla_general_total = pd.DataFrame([{
-        "HW": df_pred["HW"].sum(), "LR": df_pred["LR"].sum(),
-        "LSTM": df_pred["LSTM"].sum(), "REAL": df_pred["REAL"].sum()
+        "HW": df_pred["HW"].sum(),
+        "LSTM": df_pred["LSTM"].sum(),
+        "REAL": df_pred["REAL"].sum()
     }])
+
     tabla_general_total["DIF_HW"] = tabla_general_total["REAL"] - tabla_general_total["HW"]
-    tabla_general_total["DIF_LR"] = tabla_general_total["REAL"] - tabla_general_total["LR"]
     tabla_general_total["DIF_LSTM"] = tabla_general_total["REAL"] - tabla_general_total["LSTM"]
     tabla_general_total["ACC_HW"] = tabla_general_total.apply(lambda x: error_pct(x["REAL"], x["HW"]), axis=1)
-    tabla_general_total["ACC_LR"] = tabla_general_total.apply(lambda x: error_pct(x["REAL"], x["LR"]), axis=1)
     tabla_general_total["ACC_LSTM"] = tabla_general_total.apply(lambda x: error_pct(x["REAL"], x["LSTM"]), axis=1)
 
-    # === TABLA 9: color total ===
-    tabla_color_total = df_merge.groupby("COLOR")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
+    # ---------------------------------------------------------
+    # TABLA 9 — Total por color
+    # ---------------------------------------------------------
+    tabla_color_total = df_merge.groupby("COLOR")[["HW", "LSTM", "REAL"]].sum().reset_index()
+
     tabla_color_total["DIF_HW"] = tabla_color_total["REAL"] - tabla_color_total["HW"]
-    tabla_color_total["DIF_LR"] = tabla_color_total["REAL"] - tabla_color_total["LR"]
     tabla_color_total["DIF_LSTM"] = tabla_color_total["REAL"] - tabla_color_total["LSTM"]
     tabla_color_total["ACC_HW"] = tabla_color_total.apply(lambda x: error_pct(x["REAL"], x["HW"]), axis=1)
-    tabla_color_total["ACC_LR"] = tabla_color_total.apply(lambda x: error_pct(x["REAL"], x["LR"]), axis=1)
     tabla_color_total["ACC_LSTM"] = tabla_color_total.apply(lambda x: error_pct(x["REAL"], x["LSTM"]), axis=1)
 
-    # === TABLA 10: color por bloques ===
-    tabla_color_bloques = df_merge.groupby(["COLOR", "BLOQUE"])[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
+    # ---------------------------------------------------------
+    # TABLA 10 — Color por bloques
+    # ---------------------------------------------------------
+    tabla_color_bloques = df_merge.groupby(["COLOR", "BLOQUE"])[["HW", "LSTM", "REAL"]].sum().reset_index()
+
     tabla_color_bloques["DIF_HW"] = tabla_color_bloques["REAL"] - tabla_color_bloques["HW"]
-    tabla_color_bloques["DIF_LR"] = tabla_color_bloques["REAL"] - tabla_color_bloques["LR"]
     tabla_color_bloques["DIF_LSTM"] = tabla_color_bloques["REAL"] - tabla_color_bloques["LSTM"]
     tabla_color_bloques["ACC_HW"] = tabla_color_bloques.apply(lambda x: error_pct(x["REAL"], x["HW"]), axis=1)
-    tabla_color_bloques["ACC_LR"] = tabla_color_bloques.apply(lambda x: error_pct(x["REAL"], x["LR"]), axis=1)
     tabla_color_bloques["ACC_LSTM"] = tabla_color_bloques.apply(lambda x: error_pct(x["REAL"], x["LSTM"]), axis=1)
 
+    # Colores del heatmap
     def get_color(value):
         if value <= 20: return "#d4edda"
         elif 21 <= value <= 30: return "#fff3cd"
@@ -379,8 +364,9 @@ def produccion_dos():
 
     try:
         max_semana = int(df_reales["SEMANA"].max())
-        if pd.isna(max_semana) or max_semana < 1: max_semana = 52
-    except Exception:
+        if pd.isna(max_semana) or max_semana < 1:
+            max_semana = 52
+    except:
         max_semana = 52
 
     datos_interactivos = {
@@ -410,6 +396,7 @@ def produccion_dos():
         datos_interactivos=datos_interactivos,
         max_semana=max_semana
     )
+
 
 # ----------------------------
 # Prediccion - Tabla      PANTALLA 2 arriba
