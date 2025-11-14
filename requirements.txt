@@ -7,4 +7,4 @@ meteostat
 statsmodels
 scikit-learn
 openpyxl
-tensorflow
+
