@@ -51,7 +51,7 @@ def logout():
 # ----------------------------
 # Produccion    PANTALLA arriba 1
 # ----------------------------
-@app.route('/produccion', methods=['GET', 'POST'])
+@app.route('/produccion', methods=['GET', 'POST']) 
 def produccion():
     if 'usuario' not in session:
         return redirect(url_for('login'))
@@ -60,60 +60,50 @@ def produccion():
         # Leer el archivo Excel
         df = pd.read_excel('produccion.xlsx')
 
-        # Normalizar nombres de columnas
+        # Normalizar nombres y texto
         df.columns = df.columns.str.strip().str.upper()
-
-        # Normalizar texto en columnas clave
         for col in ['MES', 'COLOR', 'TIPO', 'VARIEDAD']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip().str.upper()
 
-        # Asegurar que TALLOS sea numérico
         df['TALLOS'] = pd.to_numeric(df['TALLOS'], errors='coerce').fillna(0)
 
-        # Mapear meses a números
+        # Mes a número
         meses_map = {
             'ENERO': 1, 'FEBRERO': 2, 'MARZO': 3, 'ABRIL': 4, 'MAYO': 5, 'JUNIO': 6,
             'JULIO': 7, 'AGOSTO': 8, 'SEPTIEMBRE': 9, 'OCTUBRE': 10, 'NOVIEMBRE': 11, 'DICIEMBRE': 12
         }
         df['MES_NUM'] = df['MES'].map(meses_map)
 
-        # Validar columnas necesarias
+        # Validación
         columnas_requeridas = {'AÑO', 'MES', 'SEMANA', 'COLOR', 'TIPO', 'VARIEDAD', 'TALLOS'}
         if not columnas_requeridas.issubset(df.columns):
             return "El archivo no contiene todas las columnas necesarias."
 
-        # 🔥 FILTRAR SOLO AÑOS DESDE 2019
-        df = df[df['AÑO'] >= 2019]
+        # FILTRAR DESDE 2019
+        df = df[df['AÑO'] >= 2022]
 
-        # Limpiar y ordenar datos
+        # Limpieza
         df['SEMANA'] = pd.to_numeric(df['SEMANA'], errors='coerce')
-        df.dropna(subset=['SEMANA'], inplace=True)  # Eliminar filas donde SEMANA sea nulo
+        df.dropna(subset=['SEMANA'], inplace=True)
         df = df[(df['SEMANA'] >= 1) & (df['SEMANA'] <= 52)]
         df['SEMANA'] = df['SEMANA'].astype(int)
         df = df.sort_values(by=['AÑO', 'MES_NUM', 'SEMANA'])
 
-        # Tabla HTML para mostrar debajo (opcional)
-        tabla_html = df.to_html(classes='table table-striped table-bordered', index=False, border=0)
-
-        # ----- Gráficas -----
+        # ----- SOLO GRÁFICAS -----
         variedades = sorted(df['VARIEDAD'].unique())
         graficas = {}
 
         for variedad in variedades:
             datos_var = df[df['VARIEDAD'] == variedad]
 
-            if datos_var.empty:
-                continue
-
-            # Agrupar por año y semana
             resumen = datos_var.groupby(['AÑO', 'SEMANA'], as_index=False)['TALLOS'].sum()
             if resumen.empty:
                 continue
 
             fig = go.Figure()
 
-            # Añadir líneas por año
+            # Líneas por año
             for anio in sorted(resumen['AÑO'].unique()):
                 datos_anio = resumen[resumen['AÑO'] == anio].sort_values('SEMANA')
                 fig.add_trace(go.Scatter(
@@ -123,7 +113,6 @@ def produccion():
                     name=f"Año {anio}"
                 ))
 
-            # Configuración estética
             fig.update_layout(
                 title=f"Producción semanal - {variedad}",
                 xaxis_title='Semana',
@@ -141,10 +130,11 @@ def produccion():
             
             graficas[variedad] = plot(fig, output_type='div', include_plotlyjs=True)
 
-        return render_template('produccion.html', data=tabla_html, graficas=graficas)
+        return render_template('produccion.html', graficas=graficas)
 
     except Exception as e:
         return f"Error al procesar la producción: {e}"
+
 
     
 # ----------------------------
