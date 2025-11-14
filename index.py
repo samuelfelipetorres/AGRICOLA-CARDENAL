@@ -57,10 +57,6 @@ def produccion():
         return redirect(url_for('login'))
 
     try:
-        # Importar plotly aquí si no está global
-        import plotly.graph_objects as go
-        from plotly.offline import plot
-
         # Leer el archivo Excel
         df = pd.read_excel('produccion.xlsx')
 
@@ -150,7 +146,6 @@ def produccion():
 # ----------------------------
 # Producción - Gráfica semanal interactiva   PANTALLA abajo 1
 # ----------------------------
-# Ruta completa
 @app.route('/produccion_dos', methods=['GET', 'POST'])
 def produccion_dos():
     if 'usuario' not in session:
@@ -430,13 +425,12 @@ def prediccion_tabla():
         format="%G%V%w", errors="coerce"
     )
 
-    ### CAMBIO ###: Determinar la última semana REAL antes de filtrar
+    # Determinar última semana real antes de filtrar
     ultimo_año_real = df_original["AÑO"].max()
     ultima_semana_real = df_original[df_original["AÑO"] == ultimo_año_real]["SEMANA"].max()
 
     # === 1b. Crear un DataFrame HISTÓRICO solo con años completos para entrenar ===
     semanas_por_año = df_original.groupby("AÑO")["SEMANA"].nunique()
-    # Usamos >= 52 para ser robustos si algún año tiene 53 semanas
     años_completos = semanas_por_año[semanas_por_año >= 52].index
     df_historico = df_original[df_original["AÑO"].isin(años_completos)].copy()
 
@@ -444,99 +438,67 @@ def prediccion_tabla():
     año_max_historico = df_historico["AÑO"].max()
     df_historico = df_historico[df_historico["AÑO"] >= año_max_historico - 5]
 
-    # === 1c. Leer Excel de datos reales (sin cambios) ===
-    df_reales = pd.read_excel("datos_reales.xlsx")
-    df_reales["FECHA"] = pd.to_datetime(
-        df_reales["AÑO"].astype(str) + df_reales["SEMANA"].astype(str) + "1",
-        format="%G%V%w", errors="coerce"
-    )
-
     # === 2. Generar predicciones ===
     filas = []
 
-    # ### CAMBIO ###: Iterar sobre las variedades del histórico
+    # Iterar sobre las variedades del histórico
     for variedad in df_historico["VARIEDAD"].unique():
-        
-        ### CAMBIO ###: Inicializar la semana y año de predicción
+
         semana_actual_pred = ultima_semana_real + 1
         año_actual_pred = ultimo_año_real
         semanas_a_generar = 8
 
         for i in range(semanas_a_generar):
+
             semana_a_predecir = semana_actual_pred
             año_a_predecir = año_actual_pred
 
-            # Si la semana a predecir supera 52, pasa al siguiente año
+            # Si la semana supera 52, pasa al siguiente año
             if semana_a_predecir > 52:
-                semana_a_predecir = semana_a_predecir - 52
-                año_a_predecir = año_a_predecir + 1
+                semana_a_predecir -= 52
+                año_a_predecir += 1
 
-            # --- PREPARACIÓN DE DATOS PARA MODELOS ---
-            df_sem = df_historico[(df_historico["VARIEDAD"] == variedad) & (df_historico["SEMANA"] == semana_a_predecir)]
+            # Preparación de datos para modelos
+            df_sem = df_historico[
+                (df_historico["VARIEDAD"] == variedad) &
+                (df_historico["SEMANA"] == semana_a_predecir)
+            ]
+
             serie_full = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
 
-            # Series para los modelos
             serie_hw = serie_full[serie_full.index >= año_max_historico - 1]
-            serie_lr = serie_full[serie_full.index == año_max_historico]
-            serie_lstm = serie_full[serie_full.index >= año_max_historico - 2]  # 3 años
+            serie_lstm = serie_full[serie_full.index >= año_max_historico - 2]
 
             if len(serie_full) < 3:
-                hw = lr = lstm = 0
+                hw = 0
+                lstm = 0
             else:
-                # --- Promedio simple (2 años) ---
+                # Promedio simple (2 años)
                 try:
                     hw = round(serie_hw.mean(), 2) if len(serie_hw) > 0 else 0
                 except:
                     hw = 0
 
-                # --- Gradient Boosting Regressor (1 año) ---
-                try:
-                    if len(serie_lr) > 1:
-                        X = serie_lr.index.values.reshape(-1, 1)
-                        y = serie_lr.values
-                        model_gb = GradientBoostingRegressor(n_estimators=200, learning_rate=0.1, max_depth=3, random_state=42)
-                        model_gb.fit(X, y)
-                        X_future = np.array([[año_max_historico + 1]])
-                        y_future = model_gb.predict(X_future)
-                        lr = round(y_future[0], 2)
-                    else:
-                        lr = round(serie_lr.mean(), 2) if len(serie_lr) > 0 else 0
-                except:
-                    lr = round(serie_lr.mean(), 2) if len(serie_lr) > 0 else 0
+                #  SE ELIMINA COMPLETAMENTE EL GRADIENT BOOSTING
+                # lr = None    # ya no se usa
 
-                # --- REEMPLAZO DEL LSTM ---
-                # AHORA: promedio simple usando los mismos 3 años
+                # Reemplazo LSTM: promedio simple usando 3 años
                 try:
                     lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
                 except:
-                    lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
-            
-            # --- COMPARACIÓN Y GUARDADO ---
-            real = df_reales[
-                (df_reales["VARIEDAD"] == variedad) & 
-                (df_reales["AÑO"] == año_a_predecir) &
-                (df_reales["SEMANA"] == semana_a_predecir)
-            ]["TALLOS"].sum()
+                    lstm = 0
 
-            if pd.isna(real) or real == 0:
-                real = 0
+            #  SE ELIMINA TODO LO RELACIONADO CON DATOS REALES, DIFERENCIAS Y ACCURACY
 
-            def error_pct(real, pred):
-                if real == 0: return 0
-                return round(abs(real - pred) / real * 100, 2)
+            filas.append([
+                variedad, año_a_predecir, semana_a_predecir, hw, lstm
+            ])
 
-            dif_hw, dif_lr, dif_lstm = real - hw, real - lr, real - lstm
-            acc_hw, acc_lr, acc_lstm = error_pct(real, hw), error_pct(real, lr), error_pct(real, lstm)
-
-            filas.append([variedad, año_a_predecir, semana_a_predecir, hw, lr, lstm, real,
-                          dif_hw, dif_lr, dif_lstm, acc_hw, acc_lr, acc_lstm])
-            
             semana_actual_pred += 1
 
     # === TABLA 1: semana a semana por variedad ===
     df_pred = pd.DataFrame(filas, columns=[
-        "VARIEDAD", "AÑO", "SEMANA", "HW", "LR", "LSTM", "REAL",
-        "DIF_HW", "DIF_LR", "DIF_LSTM", "ACC_HW", "ACC_LR", "ACC_LSTM"
+        "VARIEDAD", "AÑO", "SEMANA", "HW", "LSTM"
     ])
 
     tabla_semanal = {}
@@ -545,8 +507,11 @@ def prediccion_tabla():
             .drop(columns="VARIEDAD") \
             .to_dict(orient="records")
 
+    # ORDENAR LAS TABLAS ALFABÉTICAMENTE POR NOMBRE DE VARIEDAD
+    tabla_semanal = dict(sorted(tabla_semanal.items()))
+
     def get_color(value):
-        return "#ffffff" 
+        return "#ffffff"
 
     return render_template(
         "prediccion_tabla.html",
@@ -556,26 +521,22 @@ def prediccion_tabla():
     )
 
 
-
-
 # ----------------------------
 # Prediccion - Tabla_dos     pantalla abajo 2  
 # ----------------------------
-
-
 @app.route('/prediccion_tabla_dos')
 def prediccion_tabla_dos():
     if 'usuario' not in session:
         return redirect(url_for('login'))
 
-    # === 1. Leer Excel principal y no filtrarlo todavía ===
+    # === 1. Leer Excel principal ===
     df_original = pd.read_excel("produccion.xlsx")
     df_original["FECHA"] = pd.to_datetime(
         df_original["AÑO"].astype(str) + df_original["SEMANA"].astype(str) + "1",
         format="%G%V%w", errors="coerce"
     )
 
-    # === 1b. Crear un DataFrame HISTÓRICO solo con años completos para entrenar ===
+    # === 1b. Crear DataFrame HISTÓRICO con años completos ===
     semanas_por_año = df_original.groupby("AÑO")["SEMANA"].nunique()
     años_completos = semanas_por_año[semanas_por_año >= 52].index
     df_historico = df_original[df_original["AÑO"].isin(años_completos)].copy()
@@ -583,17 +544,7 @@ def prediccion_tabla_dos():
     año_max_historico = df_historico["AÑO"].max()
     df_historico = df_historico[df_historico["AÑO"] >= año_max_historico - 5]
 
-    año_a_predecir = año_max_historico + 1
-
-    # === 1c. Leer Excel de datos reales ===
-    df_reales = pd.read_excel("datos_reales.xlsx")
-    df_reales["FECHA"] = pd.to_datetime(
-        df_reales["AÑO"].astype(str) + df_reales["SEMANA"].astype(str) + "1",
-        format="%G%V%w", errors="coerce"
-    )
-    df_reales = df_reales[df_reales["AÑO"] == año_a_predecir]
-
-    # === 2. Generar predicciones por variedad y semana ===
+    # === 2. Generar predicciones solo HW y LSTM ===
     filas = []
 
     for variedad in df_historico["VARIEDAD"].unique():
@@ -601,15 +552,14 @@ def prediccion_tabla_dos():
 
             df_sem = df_historico[(df_historico["VARIEDAD"] == variedad) &
                                   (df_historico["SEMANA"] == semana)]
+
             serie_full = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
 
             serie_hw = serie_full[serie_full.index >= año_max_historico - 1]
-            serie_lr = serie_full[serie_full.index == año_max_historico]
-            serie_lstm = serie_full[serie_full.index >= año_max_historico - 2]   # ahora solo para promedio
+            serie_lstm = serie_full[serie_full.index >= año_max_historico - 2]
 
             if len(serie_full) < 3:
-                hw = lr = lstm = 0
-
+                hw = lstm = 0
             else:
                 # --- Promedio simple (HW) ---
                 try:
@@ -617,101 +567,47 @@ def prediccion_tabla_dos():
                 except:
                     hw = 0
 
-                # --- Gradient Boosting Regressor (LR) ---
-                try:
-                    if len(serie_lr) > 1:
-                        X = serie_lr.index.values.reshape(-1, 1)
-                        y = serie_lr.values
-                        model_gb = GradientBoostingRegressor(
-                            n_estimators=200, learning_rate=0.1, max_depth=3, random_state=42
-                        )
-                        model_gb.fit(X, y)
-                        y_future = model_gb.predict(np.array([[año_max_historico + 1]]))
-                        lr = round(y_future[0], 2)
-                    else:
-                        lr = round(serie_lr.mean(), 2) if len(serie_lr) > 0 else 0
-                except:
-                    lr = round(serie_lr.mean(), 2) if len(serie_lr) > 0 else 0
-
-                # --- Reemplazo del LSTM por PROMEDIO SIMPLE ---
+                # --- PROMEDIO simple (sustituto de LSTM) ---
                 try:
                     lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
                 except:
                     lstm = 0
 
-            # --- Comparación con datos reales ---
-            real = df_reales[
-                (df_reales["VARIEDAD"] == variedad) &
-                (df_reales["SEMANA"] == semana)
-            ]["TALLOS"].sum()
-
-            real = 0 if pd.isna(real) or real == 0 else real
-
-            def error_pct(real, pred):
-                if real == 0:
-                    return 0
-                return round(abs(real - pred) / real * 100, 2)
-
-            dif_hw, dif_lr, dif_lstm = real - hw, real - lr, real - lstm
-            acc_hw, acc_lr, acc_lstm = error_pct(real, hw), error_pct(real, lr), error_pct(real, lstm)
-
+            # Guardar solo predicciones
             filas.append([
-                variedad, semana, hw, lr, lstm, real,
-                dif_hw, dif_lr, dif_lstm,
-                acc_hw, acc_lr, acc_lstm
+                variedad, semana, hw, lstm
             ])
 
     df_pred = pd.DataFrame(filas, columns=[
-        "VARIEDAD", "SEMANA", "HW", "LR", "LSTM", "REAL",
-        "DIF_HW", "DIF_LR", "DIF_LSTM", "ACC_HW", "ACC_LR", "ACC_LSTM"
+        "VARIEDAD", "SEMANA", "HW", "LSTM"
     ])
 
-    def calcular_error_pct(real, pred):
-        if real == 0:
-            return 0
-        return round(abs(real - pred) / real * 100, 2)
-
-    # === Tabla 2 ===
+    # === Crear bloques ===
     df_pred["BLOQUE"] = ((df_pred["SEMANA"] - 1) // 4) + 1
-    tabla_variedad_df = df_pred.groupby(["VARIEDAD", "BLOQUE"])[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
 
-    tabla_variedad_df["DIF_HW"] = tabla_variedad_df["REAL"] - tabla_variedad_df["HW"]
-    tabla_variedad_df["DIF_LR"] = tabla_variedad_df["REAL"] - tabla_variedad_df["LR"]
-    tabla_variedad_df["DIF_LSTM"] = tabla_variedad_df["REAL"] - tabla_variedad_df["LSTM"]
-    tabla_variedad_df["ACC_HW"] = tabla_variedad_df.apply(lambda x: calcular_error_pct(x["REAL"], x["HW"]), axis=1)
-    tabla_variedad_df["ACC_LR"] = tabla_variedad_df.apply(lambda x: calcular_error_pct(x["REAL"], x["LR"]), axis=1)
-    tabla_variedad_df["ACC_LSTM"] = tabla_variedad_df.apply(lambda x: calcular_error_pct(x["REAL"], x["LSTM"]), axis=1)
+    # === Tabla por variedad ===
+    tabla_variedad_df = df_pred.groupby(["VARIEDAD", "BLOQUE"])[["HW", "LSTM"]].sum().reset_index()
 
+    # *** ORDENAR VARIEDADES ALFABÉTICAMENTE ***
     tabla_variedad = {
         variedad: tabla_variedad_df[tabla_variedad_df["VARIEDAD"] == variedad]
         .drop(columns="VARIEDAD")
         .to_dict(orient="records")
-        for variedad in tabla_variedad_df["VARIEDAD"].unique()
+        for variedad in sorted(tabla_variedad_df["VARIEDAD"].unique())
     }
 
-    # === Tabla 5: general semanal ===
-    tabla_general_semanal = df_pred.groupby("SEMANA")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_general_semanal["DIF_HW"] = tabla_general_semanal["REAL"] - tabla_general_semanal["HW"]
-    tabla_general_semanal["DIF_LR"] = tabla_general_semanal["REAL"] - tabla_general_semanal["LR"]
-    tabla_general_semanal["DIF_LSTM"] = tabla_general_semanal["REAL"] - tabla_general_semanal["LSTM"]
-    tabla_general_semanal["ACC_HW"] = tabla_general_semanal.apply(lambda x: calcular_error_pct(x["REAL"], x["HW"]), axis=1)
-    tabla_general_semanal["ACC_LR"] = tabla_general_semanal.apply(lambda x: calcular_error_pct(x["REAL"], x["LR"]), axis=1)
-    tabla_general_semanal["ACC_LSTM"] = tabla_general_semanal.apply(lambda x: calcular_error_pct(x["REAL"], x["LSTM"]), axis=1)
+    # === Tabla general semanal ===
+    tabla_general_semanal = df_pred.groupby("SEMANA")[["HW", "LSTM"]].sum().reset_index()
 
-    # === Tabla 7: solo COLORES ===
+    # === Tabla general para COLORES (solo usando produccion.xlsx) ===
     df_excel = pd.read_excel("produccion.xlsx")[["VARIEDAD", "TIPO", "COLOR"]].drop_duplicates()
     df_merge = df_pred.merge(df_excel, on="VARIEDAD", how="left")
+
     df_colores = df_merge[df_merge["TIPO"] == "COLORES"]
 
-    tabla_general_colores = df_colores.groupby("BLOQUE")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_general_colores["DIF_HW"] = tabla_general_colores["REAL"] - tabla_general_colores["HW"]
-    tabla_general_colores["DIF_LR"] = tabla_general_colores["REAL"] - tabla_general_colores["LR"]
-    tabla_general_colores["DIF_LSTM"] = tabla_general_colores["REAL"] - tabla_general_colores["LSTM"]
-    tabla_general_colores["ACC_HW"] = tabla_general_colores.apply(lambda x: calcular_error_pct(x["REAL"], x["HW"]), axis=1)
-    tabla_general_colores["ACC_LR"] = tabla_general_colores.apply(lambda x: calcular_error_pct(x["REAL"], x["LR"]), axis=1)
-    tabla_general_colores["ACC_LSTM"] = tabla_general_colores.apply(lambda x: calcular_error_pct(x["REAL"], x["LSTM"]), axis=1)
+    tabla_general_colores = df_colores.groupby("BLOQUE")[["HW", "LSTM"]].sum().reset_index()
 
-    # === Función color ===
+    # === Función color === (si quieres usarla para pintar algo)
     def get_color(value):
         if value <= 15:
             return "#d4edda"
@@ -739,217 +635,105 @@ def prediccion_grafica():
     if 'usuario' not in session:
         return redirect(url_for('login'))
 
-    # ### INICIO DE LA MODIFICACIÓN ###
-    # Determina el rango de semanas a procesar según la selección del formulario.
-    limite_semanas = 53  # Valor por defecto: semanas 1 a 52
+    # Rango de semanas
+    limite_semanas = 53
     rango_seleccionado = '1-52'
 
     if request.method == 'POST':
         rango_seleccionado = request.form.get('rango_semanas')
         if rango_seleccionado == '1-27':
-            limite_semanas = 27 # Se usa 28 porque range() excluye el límite superior
-    # ### FIN DE LA MODIFICACIÓN ###
+            limite_semanas = 27
 
-    # === 1. Leer Excel principal ===
+    # === 1. Leer Excel principal (solo este) ===
     try:
         df = pd.read_excel("produccion.xlsx")
-        df_reales = pd.read_excel("datos_reales.xlsx")
     except FileNotFoundError as e:
-        return f"<h1>Error</h1><p>No se encontró el archivo: <strong>{e.filename}</strong>. Asegúrate de que los archivos Excel estén en la misma carpeta que la aplicación.</p>"
+        return f"<h1>Error</h1><p>No se encontró: <strong>{e.filename}</strong></p>"
 
-    df["FECHA"] = pd.to_datetime(df["AÑO"].astype(str) + df["SEMANA"].astype(str) + "1", format="%G%V%w", errors="coerce")
+    df["FECHA"] = pd.to_datetime(df["AÑO"].astype(str) + df["SEMANA"].astype(str) + "1",
+                                 format="%G%V%w", errors="coerce")
+
     año_max = df["AÑO"].max()
     df = df[df["AÑO"] >= año_max - 5]
 
-    # === 1b. Leer Excel de datos reales ===
-    df_reales["FECHA"] = pd.to_datetime(df_reales["AÑO"].astype(str) + df_reales["SEMANA"].astype(str) + "1", format="%G%V%w", errors="coerce")
-    df_reales = df_reales[df_reales["AÑO"] == año_max + 1]
-
-    # === 2. Generar predicciones por variedad y por semana ===
+    # === 2. Predicciones por semana sin datos reales ===
     filas = []
 
     for variedad in df["VARIEDAD"].unique():
-        # ### MODIFICACIÓN: Se usa la variable 'limite_semanas' en el bucle ###
         for semana in range(1, limite_semanas):
+
             df_sem = df[(df["VARIEDAD"] == variedad) & (df["SEMANA"] == semana)]
             serie_full = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
 
             serie_hw = serie_full[serie_full.index >= año_max - 1]
-            serie_lr = serie_full[serie_full.index == año_max]
             serie_lstm = serie_full[serie_full.index >= año_max - 2]
 
             if len(serie_full) < 3:
-                hw = lr = lstm = 0
+                hw = lstm = 0
             else:
                 try:
-                    hw = round(serie_hw.mean(), 2) if len(serie_hw) > 0 else 0
+                    hw = round(serie_hw.mean(), 2)
                 except:
                     hw = 0
 
                 try:
-                    if len(serie_lr) > 1:
-                        X = serie_lr.index.values.reshape(-1, 1)
-                        y = serie_lr.values
-                        model_gb = GradientBoostingRegressor(n_estimators=200, learning_rate=0.1, max_depth=3, random_state=42)
-                        model_gb.fit(X, y)
-                        lr = round(model_gb.predict(np.array([[año_max + 1]]))[0], 2)
-                    else:
-                        lr = round(serie_lr.mean(), 2) if len(serie_lr) > 0 else 0
-                except:
-                    lr = round(serie_lr.mean(), 2) if len(serie_lr) > 0 else 0
-
-                # === LSTM ELIMINADO — AHORA ES PROMEDIO SIMPLE ===
-                try:
                     lstm = round(serie_lstm.mean(), 2)
                 except:
-                    lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
+                    lstm = 0
 
-            real = df_reales[(df_reales["VARIEDAD"] == variedad) & (df_reales["SEMANA"] == semana)]["TALLOS"].sum()
-            real = 0 if pd.isna(real) else real
+            filas.append([variedad, semana, hw, lstm])
 
-            def error_pct(real_val, pred_val):
-                if real_val == 0: return 0
-                return round(abs(real_val - pred_val) / real_val * 100, 2)
-
-            filas.append([variedad, semana, hw, lr, lstm, real,
-                          real - hw, real - lr, real - lstm,
-                          error_pct(real, hw), error_pct(real, lr), error_pct(real, lstm)])
-
-    # === 3. DataFrame final ===
-    df_pred = pd.DataFrame(filas, columns=["VARIEDAD", "SEMANA", "HW", "LR", "LSTM", "REAL", "DIF_HW", "DIF_LR", "DIF_LSTM", "ACC_HW", "ACC_LR", "ACC_LSTM"])
+    # === 3. DataFrame final (solo predicciones) ===
+    df_pred = pd.DataFrame(filas, columns=["VARIEDAD", "SEMANA", "HW", "LSTM"])
 
     if df_pred.empty:
         return render_template("prediccion_grafica.html",
-                               error="No se generaron datos. Revisa el rango de semanas o los archivos de entrada.",
+                               error="No se generaron datos.",
                                rango_actual=rango_seleccionado)
 
-
-    # ==============================================================================
-    # 4. GENERACIÓN COMPLETA DE TABLAS
-    # ==============================================================================
-    
-    # Función de error para aplicar en DataFrames
-    def error_pct_df(real, pred):
-        if real == 0: return 0
-        return round(abs(real - pred) / real * 100, 2)
-
-    # === Tabla 1: semana a semana ===
-    tabla_semanal = {v: df_pred[df_pred["VARIEDAD"] == v].drop(columns="VARIEDAD").to_dict(orient="records") for v in df_pred["VARIEDAD"].unique()}
-
-    # === Tabla 2: sumas cada 4 semanas por variedad ===
-    df_pred["BLOQUE"] = ((df_pred["SEMANA"] - 1) // 4) + 1
-    tabla_variedad_df = df_pred.groupby(["VARIEDAD", "BLOQUE"])[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_variedad_df["DIF_HW"] = tabla_variedad_df["REAL"] - tabla_variedad_df["HW"]
-    tabla_variedad_df["DIF_LR"] = tabla_variedad_df["REAL"] - tabla_variedad_df["LR"]
-    tabla_variedad_df["DIF_LSTM"] = tabla_variedad_df["REAL"] - tabla_variedad_df["LSTM"]
-    tabla_variedad_df["ACC_HW"] = tabla_variedad_df.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_variedad_df["ACC_LR"] = tabla_variedad_df.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_variedad_df["ACC_LSTM"] = tabla_variedad_df.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
-    tabla_variedad = {v: tabla_variedad_df[tabla_variedad_df["VARIEDAD"] == v].drop(columns="VARIEDAD").to_dict(orient="records") for v in tabla_variedad_df["VARIEDAD"].unique()}
-
-    # === Tabla 3: total anual por variedad ===
-    tabla_total = df_pred.groupby("VARIEDAD")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_total["DIF_HW"] = tabla_total["REAL"] - tabla_total["HW"]
-    tabla_total["DIF_LR"] = tabla_total["REAL"] - tabla_total["LR"]
-    tabla_total["DIF_LSTM"] = tabla_total["REAL"] - tabla_total["LSTM"]
-    tabla_total["ACC_HW"] = tabla_total.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_total["ACC_LR"] = tabla_total.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_total["ACC_LSTM"] = tabla_total.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
-
-    # === Tabla 4: total por tipo ===
-    df_excel = pd.read_excel("produccion.xlsx")[["VARIEDAD", "TIPO", "COLOR"]].drop_duplicates()
-    df_merge = df_pred.merge(df_excel, on="VARIEDAD", how="left")
-    tabla_tipo = df_merge.groupby("TIPO")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_tipo["DIF_HW"] = tabla_tipo["REAL"] - tabla_tipo["HW"]
-    tabla_tipo["DIF_LR"] = tabla_tipo["REAL"] - tabla_tipo["LR"]
-    tabla_tipo["DIF_LSTM"] = tabla_tipo["REAL"] - tabla_tipo["LSTM"]
-    tabla_tipo["ACC_HW"] = tabla_tipo.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_tipo["ACC_LR"] = tabla_tipo.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_tipo["ACC_LSTM"] = tabla_tipo.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
-    tabla_tipo = tabla_tipo[tabla_tipo["TIPO"].isin(["COLORES", "ROJO"])]
-
-    # === TABLA 5: general semana a semana ===
-    tabla_general_semanal = df_pred.groupby("SEMANA")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_general_semanal["DIF_HW"] = tabla_general_semanal["REAL"] - tabla_general_semanal["HW"]
-    tabla_general_semanal["DIF_LR"] = tabla_general_semanal["REAL"] - tabla_general_semanal["LR"]
-    tabla_general_semanal["DIF_LSTM"] = tabla_general_semanal["REAL"] - tabla_general_semanal["LSTM"]
-    tabla_general_semanal["ACC_HW"] = tabla_general_semanal.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_general_semanal["ACC_LR"] = tabla_general_semanal.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_general_semanal["ACC_LSTM"] = tabla_general_semanal.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
-
-    # === TABLA 6: general por bloques de 4 semanas ===
-    tabla_general_bloques = df_pred.groupby("BLOQUE")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_general_bloques["DIF_HW"] = tabla_general_bloques["REAL"] - tabla_general_bloques["HW"]
-    tabla_general_bloques["DIF_LR"] = tabla_general_bloques["REAL"] - tabla_general_bloques["LR"]
-    tabla_general_bloques["DIF_LSTM"] = tabla_general_bloques["REAL"] - tabla_general_bloques["LSTM"]
-    tabla_general_bloques["ACC_HW"] = tabla_general_bloques.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_general_bloques["ACC_LR"] = tabla_general_bloques.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_general_bloques["ACC_LSTM"] = tabla_general_bloques.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
-
-    # === TABLA 7: solo COLORES en bloques de 4 semanas ===
-    df_colores = df_merge[df_merge["TIPO"] == "COLORES"]
-    tabla_general_colores = df_colores.groupby("BLOQUE")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_general_colores["DIF_HW"] = tabla_general_colores["REAL"] - tabla_general_colores["HW"]
-    tabla_general_colores["DIF_LR"] = tabla_general_colores["REAL"] - tabla_general_colores["LR"]
-    tabla_general_colores["DIF_LSTM"] = tabla_general_colores["REAL"] - tabla_general_colores["LSTM"]
-    tabla_general_colores["ACC_HW"] = tabla_general_colores.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_general_colores["ACC_LR"] = tabla_general_colores.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_general_colores["ACC_LSTM"] = tabla_general_colores.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
-
-    # === TABLA 8: total general ===
-    tabla_general_total = pd.DataFrame([df_pred[["HW", "LR", "LSTM", "REAL"]].sum().to_dict()])
-    tabla_general_total["DIF_HW"] = tabla_general_total["REAL"] - tabla_general_total["HW"]
-    tabla_general_total["DIF_LR"] = tabla_general_total["REAL"] - tabla_general_total["LR"]
-    tabla_general_total["DIF_LSTM"] = tabla_general_total["REAL"] - tabla_general_total["LSTM"]
-    tabla_general_total["ACC_HW"] = tabla_general_total.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_general_total["ACC_LR"] = tabla_general_total.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_general_total["ACC_LSTM"] = tabla_general_total.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
-
-    # === TABLA 9: total anual por COLOR ===
-    tabla_color_total = df_merge.groupby("COLOR")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_color_total["DIF_HW"] = tabla_color_total["REAL"] - tabla_color_total["HW"]
-    tabla_color_total["DIF_LR"] = tabla_color_total["REAL"] - tabla_color_total["LR"]
-    tabla_color_total["DIF_LSTM"] = tabla_color_total["REAL"] - tabla_color_total["LSTM"]
-    tabla_color_total["ACC_HW"] = tabla_color_total.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_color_total["ACC_LR"] = tabla_color_total.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_color_total["ACC_LSTM"] = tabla_color_total.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
-
-    # === TABLA 10: por COLOR en bloques de 4 semanas ===
-    tabla_color_bloques = df_merge.groupby(["COLOR", "BLOQUE"])[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_color_bloques["DIF_HW"] = tabla_color_bloques["REAL"] - tabla_color_bloques["HW"]
-    tabla_color_bloques["DIF_LR"] = tabla_color_bloques["REAL"] - tabla_color_bloques["LR"]
-    tabla_color_bloques["DIF_LSTM"] = tabla_color_bloques["REAL"] - tabla_color_bloques["LSTM"]
-    tabla_color_bloques["ACC_HW"] = tabla_color_bloques.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_color_bloques["ACC_LR"] = tabla_color_bloques.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_color_bloques["ACC_LSTM"] = tabla_color_bloques.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
-
-    # === Función para colores de celda ===
-    def get_color(value):
-        if pd.isna(value): return "#FFFFFF" # Blanco para NaN
-        if value <= 15: return "#d4edda"
-        elif 16 <= value <= 30: return "#fff3cd"
-        elif 31 <= value <= 50: return "#f8d7da"
-        else: return "#f5c6cb"
-
-    # === Determinar max_semana dinámicamente ===
-    try:
-        max_semana = int(df_pred["SEMANA"].max())
-    except (ValueError, TypeError):
-        max_semana = 0
-
-    # === Armar datos para pasar a la plantilla ===
-    datos_interactivos = {
-        "tabla_total": tabla_total.to_dict(orient="records"),
-        "tabla_tipo": tabla_tipo.to_dict(orient="records"),
-        "tabla_general_semanal": tabla_general_semanal.to_dict(orient="records"),
-        "tabla_general_bloques": tabla_general_bloques.to_dict(orient="records"),
-        "tabla_general_colores": tabla_general_colores.to_dict(orient="records"),
-        "tabla_general_total": tabla_general_total.to_dict(orient="records"),
-        "tabla_color_total": tabla_color_total.to_dict(orient="records"),
-        "tabla_color_bloques": tabla_color_bloques.to_dict(orient="records")
+    # === TABLA SEMANAL POR VARIEDAD ===
+    tabla_semanal = {
+        v: df_pred[df_pred["VARIEDAD"] == v]
+            .drop(columns="VARIEDAD")
+            .to_dict(orient="records")
+        for v in df_pred["VARIEDAD"].unique()
     }
 
-    # === Renderizar la plantilla HTML con todos los datos ===
+    # === TABLA BLOQUES DE 4 SEMANAS ===
+    df_pred["BLOQUE"] = ((df_pred["SEMANA"] - 1) // 4) + 1
+    tabla_variedad_df = df_pred.groupby(["VARIEDAD", "BLOQUE"])[["HW", "LSTM"]].sum().reset_index()
+    tabla_variedad = {
+        v: tabla_variedad_df[tabla_variedad_df["VARIEDAD"] == v]
+            .drop(columns="VARIEDAD")
+            .to_dict(orient="records")
+        for v in tabla_variedad_df["VARIEDAD"].unique()
+    }
+
+    # === TABLA TOTAL ANUAL ===
+    tabla_total = df_pred.groupby("VARIEDAD")[["HW", "LSTM"]].sum().reset_index()
+
+    # === TABLA POR TIPO ===
+    df_excel = pd.read_excel("produccion.xlsx")[["VARIEDAD", "TIPO", "COLOR"]].drop_duplicates()
+    df_merge = df_pred.merge(df_excel, on="VARIEDAD", how="left")
+    tabla_tipo = df_merge.groupby("TIPO")[["HW", "LSTM"]].sum().reset_index()
+    tabla_tipo = tabla_tipo[tabla_tipo["TIPO"].isin(["COLORES", "ROJO"])]
+
+    # === TABLA GENERAL SEMANAL ===
+    tabla_general_semanal = df_pred.groupby("SEMANA")[["HW", "LSTM"]].sum().reset_index()
+
+    # === TABLA BLOQUES GENERAL ===
+    tabla_general_bloques = df_pred.groupby("BLOQUE")[["HW", "LSTM"]].sum().reset_index()
+
+    # === COLOR ===
+    tabla_color_total = df_merge.groupby("COLOR")[["HW", "LSTM"]].sum().reset_index()
+    tabla_color_bloques = df_merge.groupby(["COLOR", "BLOQUE"])[["HW", "LSTM"]].sum().reset_index()
+
+    # === max semana ===
+    try:
+        max_semana = int(df_pred["SEMANA"].max())
+    except:
+        max_semana = 0
+
     return render_template(
         "prediccion_grafica.html",
         tabla_semanal=tabla_semanal,
@@ -958,18 +742,11 @@ def prediccion_grafica():
         tabla_tipo=tabla_tipo.to_dict(orient="records"),
         tabla_general_semanal=tabla_general_semanal.to_dict(orient="records"),
         tabla_general_bloques=tabla_general_bloques.to_dict(orient="records"),
-        tabla_general_colores=tabla_general_colores.to_dict(orient="records"),
-        tabla_general_total=tabla_general_total.to_dict(orient="records"),
         tabla_color_total=tabla_color_total.to_dict(orient="records"),
         tabla_color_bloques=tabla_color_bloques.to_dict(orient="records"),
-        get_color=get_color,
-        datos_interactivos=datos_interactivos,
         max_semana=max_semana,
-        # ### MODIFICACIÓN: Pasa la selección actual a la plantilla ###
         rango_actual=rango_seleccionado
     )
-
-
 
 # ----------------------------
 # Resumen - dos    PANTALLA 8
@@ -987,21 +764,23 @@ def resumen_dos():
         if rango_seleccionado == '1-53':
             limite_semanas = 53
 
+    # ========= SOLO SE LEE produccion.xlsx =========
     try:
         df = pd.read_excel("produccion.xlsx")
-        df_reales = pd.read_excel("datos_reales.xlsx")
     except FileNotFoundError as e:
-        return f"<h1>Error</h1><p>No se encontró el archivo: <strong>{e.filename}</strong>. Asegúrate de que los archivos Excel estén en la misma carpeta que la aplicación.</p>"
+        return f"<h1>Error</h1><p>No se encontró: <strong>{e.filename}</strong></p>"
 
-    df["FECHA"] = pd.to_datetime(df["AÑO"].astype(str) + df["SEMANA"].astype(str) + "1", format="%G%V%w", errors="coerce")
+    df["FECHA"] = pd.to_datetime(
+        df["AÑO"].astype(str) + df["SEMANA"].astype(str) + "1",
+        format="%G%V%w", errors="coerce"
+    )
+
     año_max = df["AÑO"].max()
     df = df[df["AÑO"] >= año_max - 5]
 
-    df_reales["FECHA"] = pd.to_datetime(df_reales["AÑO"].astype(str) + df_reales["SEMANA"].astype(str) + "1", format="%G%V%w", errors="coerce")
-    df_reales = df_reales[df_reales["AÑO"] == año_max + 1]
-
     filas = []
 
+    # ========= GENERACIÓN DE PREDICCIONES =========
     for variedad in df["VARIEDAD"].unique():
 
         for semana in range(1, limite_semanas):
@@ -1010,189 +789,91 @@ def resumen_dos():
             serie_full = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
 
             serie_hw = serie_full[serie_full.index >= año_max - 1]
-            serie_lr = serie_full[serie_full.index == año_max]
             serie_lstm = serie_full[serie_full.index >= año_max - 2]
 
             if len(serie_full) < 3:
-                hw = lr = lstm = 0
+                hw = lstm = 0
             else:
                 try:
-                    hw = round(serie_hw.mean(), 2) if len(serie_hw) > 0 else 0
+                    hw = round(serie_hw.mean(), 2)
                 except:
                     hw = 0
 
                 try:
-                    if len(serie_lr) > 1:
-                        X = serie_lr.index.values.reshape(-1, 1)
-                        y = serie_lr.values
-                        model_gb = GradientBoostingRegressor(n_estimators=200, learning_rate=0.1, max_depth=3, random_state=42)
-                        model_gb.fit(X, y)
-                        lr = round(model_gb.predict(np.array([[año_max + 1]]))[0], 2)
-                    else:
-                        lr = round(serie_lr.mean(), 2) if len(serie_lr) > 0 else 0
+                    lstm = round(serie_lstm.mean(), 2)
                 except:
-                    lr = round(serie_lr.mean(), 2) if len(serie_lr) > 0 else 0
+                    lstm = 0
 
-                # ============================
-                # 🔥 REEMPLAZO DEL LSTM — SOLO ESTO
-                # ============================
-                try:
-                    lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
-                except Exception as e:
-                    print(f"Error en PROMEDIO LSTM para {variedad} sem {semana}: {e}")
-                    lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
-                # ============================
-
-            real = df_reales[(df_reales["VARIEDAD"] == variedad) & (df_reales["SEMANA"] == semana)]["TALLOS"].sum()
-            real = 0 if pd.isna(real) else real
-
-            def error_pct(real_val, pred_val):
-                if real_val == 0: return 0
-                return round(abs(real_val - pred_val) / real_val * 100, 2)
-
-            filas.append([
-                variedad, semana, hw, lr, lstm, real,
-                real - hw, real - lr, real - lstm,
-                error_pct(real, hw), error_pct(real, lr), error_pct(real, lstm)
-            ])
+            filas.append([variedad, semana, hw, lstm])
 
     df_pred = pd.DataFrame(filas, columns=[
-        "VARIEDAD", "SEMANA", "HW", "LR", "LSTM", "REAL",
-        "DIF_HW", "DIF_LR", "DIF_LSTM",
-        "ACC_HW", "ACC_LR", "ACC_LSTM"
+        "VARIEDAD", "SEMANA", "HW", "LSTM"
     ])
 
     if df_pred.empty:
-        return render_template("prediccion_grafica.html",
-                               error="No se generaron datos. Revisa el rango de semanas o los archivos de entrada.",
+        return render_template("resumen_dos.html",
+                               error="No se generaron datos.",
                                rango_actual=rango_seleccionado)
 
-    # ==============================================================================
-    # 4. GENERACIÓN COMPLETA DE TABLAS
-    # ==============================================================================
-    
-    # Función de error para aplicar en DataFrames
-    def error_pct_df(real, pred):
-        if real == 0: return 0
-        return round(abs(real - pred) / real * 100, 2)
-
-    # === Tabla 1: semana a semana ===
-    tabla_semanal = {v: df_pred[df_pred["VARIEDAD"] == v].drop(columns="VARIEDAD").to_dict(orient="records") for v in df_pred["VARIEDAD"].unique()}
-
-    # === Tabla 2: sumas cada 4 semanas por variedad ===
+    # ========= BLOQUES DE 4 SEMANAS =========
     df_pred["BLOQUE"] = ((df_pred["SEMANA"] - 1) // 4) + 1
-    tabla_variedad_df = df_pred.groupby(["VARIEDAD", "BLOQUE"])[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_variedad_df["DIF_HW"] = tabla_variedad_df["REAL"] - tabla_variedad_df["HW"]
-    tabla_variedad_df["DIF_LR"] = tabla_variedad_df["REAL"] - tabla_variedad_df["LR"]
-    tabla_variedad_df["DIF_LSTM"] = tabla_variedad_df["REAL"] - tabla_variedad_df["LSTM"]
-    tabla_variedad_df["ACC_HW"] = tabla_variedad_df.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_variedad_df["ACC_LR"] = tabla_variedad_df.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_variedad_df["ACC_LSTM"] = tabla_variedad_df.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
-    tabla_variedad = {v: tabla_variedad_df[tabla_variedad_df["VARIEDAD"] == v].drop(columns="VARIEDAD").to_dict(orient="records") for v in tabla_variedad_df["VARIEDAD"].unique()}
 
-    # === Tabla 3: total anual por variedad ===
-    tabla_total = df_pred.groupby("VARIEDAD")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_total["DIF_HW"] = tabla_total["REAL"] - tabla_total["HW"]
-    tabla_total["DIF_LR"] = tabla_total["REAL"] - tabla_total["LR"]
-    tabla_total["DIF_LSTM"] = tabla_total["REAL"] - tabla_total["LSTM"]
-    tabla_total["ACC_HW"] = tabla_total.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_total["ACC_LR"] = tabla_total.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_total["ACC_LSTM"] = tabla_total.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
+    # ========= TABLA SEMANAL =========
+    tabla_semanal = {
+        v: df_pred[df_pred["VARIEDAD"] == v]
+            .drop(columns="VARIEDAD")
+            .to_dict(orient="records")
+        for v in df_pred["VARIEDAD"].unique()
+    }
 
-    # === Tabla 4: total por tipo ===
+    # ========= TABLA POR VARIEDAD EN BLOQUES =========
+    tabla_variedad_df = df_pred.groupby(["VARIEDAD", "BLOQUE"])[["HW", "LSTM"]].sum().reset_index()
+    tabla_variedad = {
+        v: tabla_variedad_df[tabla_variedad_df["VARIEDAD"] == v]
+            .drop(columns="VARIEDAD")
+            .to_dict(orient="records")
+        for v in tabla_variedad_df["VARIEDAD"].unique()
+    }
+
+    # ========= TABLA TOTAL ANUAL POR VARIEDAD =========
+    tabla_total = df_pred.groupby("VARIEDAD")[["HW", "LSTM"]].sum().reset_index()
+
+    # ========= LEER TIPO Y COLOR =========
     df_excel = pd.read_excel("produccion.xlsx")[["VARIEDAD", "TIPO", "COLOR"]].drop_duplicates()
     df_merge = df_pred.merge(df_excel, on="VARIEDAD", how="left")
-    tabla_tipo = df_merge.groupby("TIPO")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_tipo["DIF_HW"] = tabla_tipo["REAL"] - tabla_tipo["HW"]
-    tabla_tipo["DIF_LR"] = tabla_tipo["REAL"] - tabla_tipo["LR"]
-    tabla_tipo["DIF_LSTM"] = tabla_tipo["REAL"] - tabla_tipo["LSTM"]
-    tabla_tipo["ACC_HW"] = tabla_tipo.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_tipo["ACC_LR"] = tabla_tipo.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_tipo["ACC_LSTM"] = tabla_tipo.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
+
+    # ========= TABLA POR TIPO =========
+    tabla_tipo = df_merge.groupby("TIPO")[["HW", "LSTM"]].sum().reset_index()
     tabla_tipo = tabla_tipo[tabla_tipo["TIPO"].isin(["COLORES", "ROJO"])]
 
-    # === TABLA 5: general semana a semana ===
-    tabla_general_semanal = df_pred.groupby("SEMANA")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_general_semanal["DIF_HW"] = tabla_general_semanal["REAL"] - tabla_general_semanal["HW"]
-    tabla_general_semanal["DIF_LR"] = tabla_general_semanal["REAL"] - tabla_general_semanal["LR"]
-    tabla_general_semanal["DIF_LSTM"] = tabla_general_semanal["REAL"] - tabla_general_semanal["LSTM"]
-    tabla_general_semanal["ACC_HW"] = tabla_general_semanal.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_general_semanal["ACC_LR"] = tabla_general_semanal.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_general_semanal["ACC_LSTM"] = tabla_general_semanal.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
+    # ========= TABLA GENERAL SEMANAL =========
+    tabla_general_semanal = df_pred.groupby("SEMANA")[["HW", "LSTM"]].sum().reset_index()
 
-    # === TABLA 6: general por bloques de 4 semanas ===
-    tabla_general_bloques = df_pred.groupby("BLOQUE")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_general_bloques["DIF_HW"] = tabla_general_bloques["REAL"] - tabla_general_bloques["HW"]
-    tabla_general_bloques["DIF_LR"] = tabla_general_bloques["REAL"] - tabla_general_bloques["LR"]
-    tabla_general_bloques["DIF_LSTM"] = tabla_general_bloques["REAL"] - tabla_general_bloques["LSTM"]
-    tabla_general_bloques["ACC_HW"] = tabla_general_bloques.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_general_bloques["ACC_LR"] = tabla_general_bloques.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_general_bloques["ACC_LSTM"] = tabla_general_bloques.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
+    # ========= TABLA GENERAL POR BLOQUES =========
+    tabla_general_bloques = df_pred.groupby("BLOQUE")[["HW", "LSTM"]].sum().reset_index()
 
-    # === TABLA 7: solo COLORES en bloques de 4 semanas ===
-    df_colores = df_merge[df_merge["TIPO"] == "COLORES"]
-    tabla_general_colores = df_colores.groupby("BLOQUE")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_general_colores["DIF_HW"] = tabla_general_colores["REAL"] - tabla_general_colores["HW"]
-    tabla_general_colores["DIF_LR"] = tabla_general_colores["REAL"] - tabla_general_colores["LR"]
-    tabla_general_colores["DIF_LSTM"] = tabla_general_colores["REAL"] - tabla_general_colores["LSTM"]
-    tabla_general_colores["ACC_HW"] = tabla_general_colores.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_general_colores["ACC_LR"] = tabla_general_colores.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_general_colores["ACC_LSTM"] = tabla_general_colores.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
+    # ========= TABLA TOTAL POR COLOR =========
+    tabla_color_total = df_merge.groupby("COLOR")[["HW", "LSTM"]].sum().reset_index()
 
-    # === TABLA 8: total general ===
-    tabla_general_total = pd.DataFrame([df_pred[["HW", "LR", "LSTM", "REAL"]].sum().to_dict()])
-    tabla_general_total["DIF_HW"] = tabla_general_total["REAL"] - tabla_general_total["HW"]
-    tabla_general_total["DIF_LR"] = tabla_general_total["REAL"] - tabla_general_total["LR"]
-    tabla_general_total["DIF_LSTM"] = tabla_general_total["REAL"] - tabla_general_total["LSTM"]
-    tabla_general_total["ACC_HW"] = tabla_general_total.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_general_total["ACC_LR"] = tabla_general_total.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_general_total["ACC_LSTM"] = tabla_general_total.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
+    # ========= TABLA COLOR POR BLOQUES =========
+    tabla_color_bloques = df_merge.groupby(["COLOR", "BLOQUE"])[["HW", "LSTM"]].sum().reset_index()
 
-    # === TABLA 9: total anual por COLOR ===
-    tabla_color_total = df_merge.groupby("COLOR")[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_color_total["DIF_HW"] = tabla_color_total["REAL"] - tabla_color_total["HW"]
-    tabla_color_total["DIF_LR"] = tabla_color_total["REAL"] - tabla_color_total["LR"]
-    tabla_color_total["DIF_LSTM"] = tabla_color_total["REAL"] - tabla_color_total["LSTM"]
-    tabla_color_total["ACC_HW"] = tabla_color_total.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_color_total["ACC_LR"] = tabla_color_total.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_color_total["ACC_LSTM"] = tabla_color_total.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
-
-    # === TABLA 10: por COLOR en bloques de 4 semanas ===
-    tabla_color_bloques = df_merge.groupby(["COLOR", "BLOQUE"])[["HW", "LR", "LSTM", "REAL"]].sum().reset_index()
-    tabla_color_bloques["DIF_HW"] = tabla_color_bloques["REAL"] - tabla_color_bloques["HW"]
-    tabla_color_bloques["DIF_LR"] = tabla_color_bloques["REAL"] - tabla_color_bloques["LR"]
-    tabla_color_bloques["DIF_LSTM"] = tabla_color_bloques["REAL"] - tabla_color_bloques["LSTM"]
-    tabla_color_bloques["ACC_HW"] = tabla_color_bloques.apply(lambda r: error_pct_df(r["REAL"], r["HW"]), axis=1)
-    tabla_color_bloques["ACC_LR"] = tabla_color_bloques.apply(lambda r: error_pct_df(r["REAL"], r["LR"]), axis=1)
-    tabla_color_bloques["ACC_LSTM"] = tabla_color_bloques.apply(lambda r: error_pct_df(r["REAL"], r["LSTM"]), axis=1)
-
-    # === Función para colores de celda ===
-    def get_color(value):
-        if pd.isna(value): return "#FFFFFF" # Blanco para NaN
-        if value <= 15: return "#d4edda"
-        elif 16 <= value <= 30: return "#fff3cd"
-        elif 31 <= value <= 50: return "#f8d7da"
-        else: return "#f5c6cb"
-
-    # === Determinar max_semana dinámicamente ===
+    # ========= MAX SEMANA =========
     try:
         max_semana = int(df_pred["SEMANA"].max())
-    except (ValueError, TypeError):
+    except:
         max_semana = 0
 
-    # === Armar datos para pasar a la plantilla ===
+    # ========= DATOS INTERACTIVOS (SOLO HW Y LSTM) =========
     datos_interactivos = {
         "tabla_total": tabla_total.to_dict(orient="records"),
         "tabla_tipo": tabla_tipo.to_dict(orient="records"),
         "tabla_general_semanal": tabla_general_semanal.to_dict(orient="records"),
         "tabla_general_bloques": tabla_general_bloques.to_dict(orient="records"),
-        "tabla_general_colores": tabla_general_colores.to_dict(orient="records"),
-        "tabla_general_total": tabla_general_total.to_dict(orient="records"),
         "tabla_color_total": tabla_color_total.to_dict(orient="records"),
         "tabla_color_bloques": tabla_color_bloques.to_dict(orient="records")
     }
 
-    # === Renderizar la plantilla HTML con todos los datos ===
     return render_template(
         "resumen_dos.html",
         tabla_semanal=tabla_semanal,
@@ -1201,16 +882,13 @@ def resumen_dos():
         tabla_tipo=tabla_tipo.to_dict(orient="records"),
         tabla_general_semanal=tabla_general_semanal.to_dict(orient="records"),
         tabla_general_bloques=tabla_general_bloques.to_dict(orient="records"),
-        tabla_general_colores=tabla_general_colores.to_dict(orient="records"),
-        tabla_general_total=tabla_general_total.to_dict(orient="records"),
         tabla_color_total=tabla_color_total.to_dict(orient="records"),
         tabla_color_bloques=tabla_color_bloques.to_dict(orient="records"),
-        get_color=get_color,
         datos_interactivos=datos_interactivos,
         max_semana=max_semana,
-        # ### MODIFICACIÓN: Pasa la selección actual a la plantilla ###
         rango_actual=rango_seleccionado
     )
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
