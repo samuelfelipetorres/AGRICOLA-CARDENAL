@@ -57,64 +57,65 @@ def produccion():
         return redirect(url_for('login'))
 
     try:
-        # Leer archivo
+        # Leer el archivo Excel
         df = pd.read_excel('produccion.xlsx')
 
-        # Normalizar columnas
+        # Normalizar nombres de columnas
         df.columns = df.columns.str.strip().str.upper()
 
-        # Columnas a normalizar texto
-        cols_texto = ['MES', 'COLOR', 'TIPO', 'VARIEDAD']
-        for col in cols_texto:
+        # Normalizar texto en columnas clave
+        for col in ['MES', 'COLOR', 'TIPO', 'VARIEDAD']:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip().str.upper()
 
-        # Convertir TALLOS a numérico
-        df['TALLOS'] = pd.to_numeric(df.get('TALLOS', 0), errors='coerce').fillna(0)
+        # Asegurar que TALLOS sea numérico
+        df['TALLOS'] = pd.to_numeric(df['TALLOS'], errors='coerce').fillna(0)
 
-        # Map de meses (más compacto)
-        meses_map = {m: i for i, m in enumerate([
-            'ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO',
-            'JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'
-        ], 1)}
+        # Mapear meses a números
+        meses_map = {
+            'ENERO': 1, 'FEBRERO': 2, 'MARZO': 3, 'ABRIL': 4, 'MAYO': 5, 'JUNIO': 6,
+            'JULIO': 7, 'AGOSTO': 8, 'SEPTIEMBRE': 9, 'OCTUBRE': 10, 'NOVIEMBRE': 11, 'DICIEMBRE': 12
+        }
         df['MES_NUM'] = df['MES'].map(meses_map)
 
-        # Validación columnas
-        req = {'AÑO', 'MES', 'SEMANA', 'COLOR', 'TIPO', 'VARIEDAD', 'TALLOS'}
-        if not req.issubset(df.columns):
+        # Validar columnas necesarias
+        columnas_requeridas = {'AÑO', 'MES', 'SEMANA', 'COLOR', 'TIPO', 'VARIEDAD', 'TALLOS'}
+        if not columnas_requeridas.issubset(df.columns):
             return "El archivo no contiene todas las columnas necesarias."
 
-        # Limpiar SEMANA
+        # 🔥 FILTRAR SOLO AÑOS DESDE 2019
+        df = df[df['AÑO'] >= 2019]
+
+        # Limpiar y ordenar datos
         df['SEMANA'] = pd.to_numeric(df['SEMANA'], errors='coerce')
-        df = df[(df['SEMANA'].between(1, 52))]  # filtro más eficiente
+        df.dropna(subset=['SEMANA'], inplace=True)  # Eliminar filas donde SEMANA sea nulo
+        df = df[(df['SEMANA'] >= 1) & (df['SEMANA'] <= 52)]
         df['SEMANA'] = df['SEMANA'].astype(int)
+        df = df.sort_values(by=['AÑO', 'MES_NUM', 'SEMANA'])
 
-        # Ordenar
-        df = df.sort_values(['AÑO', 'MES_NUM', 'SEMANA'])
+        # Tabla HTML para mostrar debajo (opcional)
+        tabla_html = df.to_html(classes='table table-striped table-bordered', index=False, border=0)
 
-        # Tabla en HTML
-        tabla_html = df.to_html(classes='table table-striped table-bordered',
-                                index=False, border=0)
-
-        # Gráficas
+        # ----- Gráficas -----
+        variedades = sorted(df['VARIEDAD'].unique())
         graficas = {}
-        variedades = df['VARIEDAD'].unique()
 
-        # Agrupamiento único fuera del loop (optimiza muchísimo)
-        df_group = df.groupby(['VARIEDAD', 'AÑO', 'SEMANA'])['TALLOS'].sum().reset_index()
-
-        for variedad in sorted(variedades):
-            datos_var = df_group[df_group['VARIEDAD'] == variedad]
+        for variedad in variedades:
+            datos_var = df[df['VARIEDAD'] == variedad]
 
             if datos_var.empty:
+                continue
+
+            # Agrupar por año y semana
+            resumen = datos_var.groupby(['AÑO', 'SEMANA'], as_index=False)['TALLOS'].sum()
+            if resumen.empty:
                 continue
 
             fig = go.Figure()
 
             # Añadir líneas por año
-            for anio, datos_anio in datos_var.groupby('AÑO'):
-                datos_anio = datos_anio.sort_values('SEMANA')
-
+            for anio in sorted(resumen['AÑO'].unique()):
+                datos_anio = resumen[resumen['AÑO'] == anio].sort_values('SEMANA')
                 fig.add_trace(go.Scatter(
                     x=datos_anio['SEMANA'],
                     y=datos_anio['TALLOS'],
@@ -122,7 +123,7 @@ def produccion():
                     name=f"Año {anio}"
                 ))
 
-            # Estética
+            # Configuración estética
             fig.update_layout(
                 title=f"Producción semanal - {variedad}",
                 xaxis_title='Semana',
@@ -131,12 +132,13 @@ def produccion():
                 hovermode='x unified',
                 xaxis=dict(
                     tickmode='linear',
-                    tick0=1, dtick=1,
+                    tick0=1,
+                    dtick=1,
                     range=[1, 52]
                 ),
                 margin=dict(l=40, r=20, t=50, b=40)
             )
-
+            
             graficas[variedad] = plot(fig, output_type='div', include_plotlyjs=True)
 
         return render_template('produccion.html', data=tabla_html, graficas=graficas)
