@@ -374,29 +374,54 @@ def prediccion_tabla_dos():
     if 'usuario' not in session:
         return redirect(url_for('login'))
 
-    # === 1. Leer Excel principal ===
+    # === 1. Leer Excel principal y no filtrarlo todavía ===
     df_original = pd.read_excel("produccion.xlsx")
+    # Columnas esperadas: AÑO | MES | SEMANA | COLOR | TIPO | VARIEDAD | TALLOS
+
+    # Crear columna FECHA en el dataframe original
     df_original["FECHA"] = pd.to_datetime(
         df_original["AÑO"].astype(str) + df_original["SEMANA"].astype(str) + "1",
         format="%G%V%w", errors="coerce"
     )
 
-    # === 1b. Crear DataFrame HISTÓRICO con años completos ===
+    # Determinar última semana real antes de filtrar
+    ultimo_año_real = df_original["AÑO"].max()
+    ultima_semana_real = df_original[df_original["AÑO"] == ultimo_año_real]["SEMANA"].max()
+
+    # === 1b. Crear un DataFrame HISTÓRICO solo con años completos para entrenar ===
     semanas_por_año = df_original.groupby("AÑO")["SEMANA"].nunique()
     años_completos = semanas_por_año[semanas_por_año >= 52].index
     df_historico = df_original[df_original["AÑO"].isin(años_completos)].copy()
 
+    # Filtrar últimos 5 años completos en el histórico
     año_max_historico = df_historico["AÑO"].max()
     df_historico = df_historico[df_historico["AÑO"] >= año_max_historico - 5]
 
-    # === 2. Generar predicciones solo HW y LSTM ===
+    # === 2. Generar predicciones ===
     filas = []
 
+    # Iterar sobre las variedades del histórico
     for variedad in df_historico["VARIEDAD"].unique():
-        for semana in range(1, 9):
 
-            df_sem = df_historico[(df_historico["VARIEDAD"] == variedad) &
-                                  (df_historico["SEMANA"] == semana)]
+        semana_actual_pred = ultima_semana_real + 1
+        año_actual_pred = ultimo_año_real
+        semanas_a_generar = 8
+
+        for i in range(semanas_a_generar):
+
+            semana_a_predecir = semana_actual_pred
+            año_a_predecir = año_actual_pred
+
+            # Si la semana supera 52, pasa al siguiente año
+            if semana_a_predecir > 52:
+                semana_a_predecir -= 52
+                año_a_predecir += 1
+
+            # Preparación de datos para modelos
+            df_sem = df_historico[
+                (df_historico["VARIEDAD"] == variedad) &
+                (df_historico["SEMANA"] == semana_a_predecir)
+            ]
 
             serie_full = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
 
@@ -404,71 +429,54 @@ def prediccion_tabla_dos():
             serie_lstm = serie_full[serie_full.index >= año_max_historico - 2]
 
             if len(serie_full) < 3:
-                hw = lstm = 0
+                hw = 0
+                lstm = 0
             else:
-                # --- Promedio simple (HW) ---
+                # Promedio simple (2 años)
                 try:
                     hw = round(serie_hw.mean(), 2) if len(serie_hw) > 0 else 0
                 except:
                     hw = 0
 
-                # --- PROMEDIO simple (sustituto de LSTM) ---
+                #  SE ELIMINA COMPLETAMENTE EL GRADIENT BOOSTING
+                # lr = None    # ya no se usa
+
+                # Reemplazo LSTM: promedio simple usando 3 años
                 try:
                     lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
                 except:
                     lstm = 0
 
-            # Guardar solo predicciones
+            #  SE ELIMINA TODO LO RELACIONADO CON DATOS REALES, DIFERENCIAS Y ACCURACY
+
             filas.append([
-                variedad, semana, hw, lstm
+                variedad, año_a_predecir, semana_a_predecir, hw, lstm
             ])
 
+            semana_actual_pred += 1
+
+    # === TABLA 1: semana a semana por variedad ===
     df_pred = pd.DataFrame(filas, columns=[
-        "VARIEDAD", "SEMANA", "HW", "LSTM"
+        "VARIEDAD", "AÑO", "SEMANA", "HW", "LSTM"
     ])
 
-    # === Crear bloques ===
-    df_pred["BLOQUE"] = ((df_pred["SEMANA"] - 1) // 4) + 1
+    tabla_semanal = {}
+    for variedad in df_pred["VARIEDAD"].unique():
+        tabla_semanal[variedad] = df_pred[df_pred["VARIEDAD"] == variedad] \
+            .drop(columns="VARIEDAD") \
+            .to_dict(orient="records")
 
-    # === Tabla por variedad ===
-    tabla_variedad_df = df_pred.groupby(["VARIEDAD", "BLOQUE"])[["HW", "LSTM"]].sum().reset_index()
+    # ORDENAR LAS TABLAS ALFABÉTICAMENTE POR NOMBRE DE VARIEDAD
+    tabla_semanal = dict(sorted(tabla_semanal.items()))
 
-    # *** ORDENAR VARIEDADES ALFABÉTICAMENTE ***
-    tabla_variedad = {
-        variedad: tabla_variedad_df[tabla_variedad_df["VARIEDAD"] == variedad]
-        .drop(columns="VARIEDAD")
-        .to_dict(orient="records")
-        for variedad in sorted(tabla_variedad_df["VARIEDAD"].unique())
-    }
-
-    # === Tabla general semanal ===
-    tabla_general_semanal = df_pred.groupby("SEMANA")[["HW", "LSTM"]].sum().reset_index()
-
-    # === Tabla general para COLORES (solo usando produccion.xlsx) ===
-    df_excel = pd.read_excel("produccion.xlsx")[["VARIEDAD", "TIPO", "COLOR"]].drop_duplicates()
-    df_merge = df_pred.merge(df_excel, on="VARIEDAD", how="left")
-
-    df_colores = df_merge[df_merge["TIPO"] == "COLORES"]
-
-    tabla_general_colores = df_colores.groupby("BLOQUE")[["HW", "LSTM"]].sum().reset_index()
-
-    # === Función color === (si quieres usarla para pintar algo)
     def get_color(value):
-        if value <= 15:
-            return "#d4edda"
-        elif 16 <= value <= 30:
-            return "#fff3cd"
-        elif 31 <= value <= 50:
-            return "#f8d7da"
-        else:
-            return "#f5c6cb"
+        return "#ffffff"
 
     return render_template(
         "prediccion_tabla_dos.html",
-        tabla_variedad=tabla_variedad,
-        tabla_general_semanal=tabla_general_semanal.to_dict(orient="records"),
-        tabla_general_colores=tabla_general_colores.to_dict(orient="records"),
-        get_color=get_color
+        tabla_semanal=tabla_semanal,
+        get_color=get_color,
+        max_semana=ultima_semana_real
     )
 
 # ----------------------------

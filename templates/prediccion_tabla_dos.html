@@ -1,249 +1,162 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <title>📊 Predicción de Producción Semana a Semana</title>
+<meta charset="UTF-8">
+<title>Predicciones por Variedad</title>
 
-    <!-- Tailwind + Poppins -->
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;600;700&display=swap" rel="stylesheet">
+<!-- Tailwind CSS -->
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 
-    <!-- DataTables -->
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
-    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css">
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-    <style>
-        body {
-            font-family: 'Poppins', sans-serif;
-            background-color: #0f172a;
-            background-image: radial-gradient(circle at 25% 25%, rgba(59,130,246,0.15), transparent 40%),
-                              radial-gradient(circle at 75% 75%, rgba(139,92,246,0.15), transparent 40%);
-            color: #f1f5f9;
-        }
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;600;700&display=swap" rel="stylesheet">
 
-        header {
-            background: rgba(30,41,59,0.7);
-            backdrop-filter: blur(12px);
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            box-shadow: 0 4px 10px rgba(0,0,0,0.4);
-        }
+<style>
+    body {
+        font-family: 'Poppins', sans-serif;
+        background-color: #111827;
+        color: #f9fafb;
+    }
+    .card {
+        background: #1f2937;
+        border-radius: 1rem;
+        padding: 1.5rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .card:hover {
+        transform: translateY(-3px);
+        transition: 0.2s;
+    }
+    canvas { max-height: 270px; }
+</style>
 
-        h1 {
-            background: linear-gradient(90deg, #60a5fa, #a78bfa);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            font-weight: 700;
-        }
-
-        h5 {
-            color: #93c5fd;
-            font-weight: 600;
-            margin-bottom: 1rem;
-        }
-
-        h6 {
-            color: #a78bfa;
-            margin-bottom: 0.5rem;
-        }
-
-        .container-custom {
-            background: linear-gradient(145deg, rgba(30,41,59,0.85), rgba(15,23,42,0.85));
-            backdrop-filter: blur(15px);
-            border-radius: 1.25rem;
-            border: 1px solid rgba(255,255,255,0.1);
-            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-            padding: 2.5rem;
-            margin: 3rem auto;
-            max-width: 1300px;
-        }
-
-        table.dataTable {
-            border-collapse: collapse !important;
-            border-radius: 0.75rem;
-            overflow: hidden;
-            box-shadow: 0 0 15px rgba(96,165,250,0.1);
-            background: rgba(255,255,255,0.03);
-            width: 100%;
-        }
-
-        table.dataTable thead {
-            background: rgba(59,130,246,0.15);
-        }
-
-        table.dataTable th {
-            color: #93c5fd !important;
-            font-weight: 600;
-            text-transform: uppercase;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            text-align: center;
-        }
-
-        table.dataTable td {
-            color: #e2e8f0;
-            text-align: center;
-            padding: 10px 12px;
-        }
-
-        table.dataTable tbody tr:nth-child(even) {
-            background: rgba(255,255,255,0.05);
-        }
-
-        table.dataTable tbody tr:hover {
-            background: rgba(96,165,250,0.1);
-            transition: 0.3s ease;
-        }
-
-        .dataTables_filter input {
-            background: rgba(255,255,255,0.1);
-            border: 1px solid rgba(255,255,255,0.15);
-            color: #e2e8f0;
-            border-radius: 0.5rem;
-            padding: 5px 10px;
-        }
-
-        .dt-buttons button {
-            background: linear-gradient(90deg, #60a5fa, #a78bfa);
-            border: none;
-            color: white;
-            border-radius: 9999px;
-            padding: 6px 14px;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            margin-right: 6px;
-        }
-
-        .dt-buttons button:hover {
-            transform: scale(1.05);
-            box-shadow: 0 0 12px rgba(96,165,250,0.4);
-        }
-
-        .logout-btn {
-            background: linear-gradient(90deg, #ef4444, #dc2626);
-            border-radius: 9999px;
-            color: #fff;
-            transition: all 0.3s ease;
-        }
-
-        .logout-btn:hover {
-            background: linear-gradient(90deg, #f87171, #ef4444);
-            transform: scale(1.05);
-            box-shadow: 0 0 15px rgba(239,68,68,0.4);
-        }
-
-        footer {
-            background: rgba(30,41,59,0.8);
-            backdrop-filter: blur(10px);
-            color: rgba(203,213,225,0.8);
-            border-top: 1px solid rgba(255,255,255,0.1);
-        }
-    </style>
 </head>
 
-<body class="min-h-screen flex flex-col">
+<body class="min-h-screen py-10 px-6">
 
-    <!-- HEADER -->
-    <header class="py-4 px-6 flex justify-between items-center">
-        <div>
-            <h1 class="text-2xl font-bold">📊 Predicción de Producción 4 Semanas</h1>
-            <p class="text-gray-400 text-sm">Predicciones generadas por modelos de IA</p>
+<div class="max-w-7xl mx-auto">
+
+    <h1 class="text-3xl font-bold text-center mb-10">Predicción por Variedad</h1>
+
+    <!-- TARJETAS DE RESUMEN -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+        <div class="card text-center">
+            <h3 class="text-gray-400">Total de Variedades</h3>
+            <p class="text-3xl font-bold text-blue-400">{{ tabla_semanal|length }}</p>
         </div>
 
-        <a href="{{ url_for('dashboard') }}" class="logout-btn py-2 px-4 flex items-center shadow-md">
-            <i class="fas fa-arrow-left mr-2"></i> Volver
-        </a>
-    </header>
+        <div class="card text-center">
+            <h3 class="text-gray-400">Semana Real Actual</h3>
+            <p class="text-3xl font-bold text-green-400">{{ max_semana }}</p>
+        </div>
 
-    <!-- CONTENIDO -->
-    <main class="flex-grow py-10 px-6">
-        <div class="container-custom">
+        <div class="card text-center">
+            <h3 class="text-gray-400">Semanas Predecidas</h3>
+            <p class="text-3xl font-bold text-yellow-400">8</p>
+        </div>
+    </div>
 
-            <h5>📈 Predicciones por variedad</h5>
 
-            {# Recorremos todas las variedades excepto la primera #}
-            {% set variedades = tabla_variedad.items()|list %}
-            {% for variedad, datos in variedades[1:] %}
-                <h6>{{ variedad }}</h6>
-                <div class="table-responsive mb-10">
-                    <table class="display stripe hover">
-                        <thead>
+    <!-- TARJETAS POR CADA VARIEDAD -->
+    <div class="space-y-10">
+        {% for variedad, registros in tabla_semanal.items() %}
+
+        <div class="card">
+
+            <h2 class="text-xl font-semibold mb-3 text-blue-300">{{ variedad }}</h2>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+                <!-- GRAFICO -->
+                <div>
+                    <canvas id="graf{{ loop.index }}"></canvas>
+                </div>
+
+                <!-- TABLA -->
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead class="border-b border-gray-600">
                             <tr>
-                                <th>GRUPO</th>
-                                <th>HW</th>
-                                <th>LSTM</th>
+                                <th class="px-4 py-2 text-gray-300">Año</th>
+                                <th class="px-4 py-2 text-gray-300">Semana</th>
+                                <th class="px-4 py-2 text-blue-400">HW</th>
+                                <th class="px-4 py-2 text-purple-400">LSTM</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {% for fila in datos %}
-                            <tr>
-                                <td>{{ loop.index }}</td>  {# numeración automática de semanas #}
-                                <td>{{ fila.HW }}</td>
-                                <td>{{ fila.LSTM }}</td>
+                            {% for fila in registros %}
+                            <tr class="border-b border-gray-800">
+                                <td class="px-4 py-2">{{ fila.AÑO }}</td>
+                                <td class="px-4 py-2">{{ fila.SEMANA }}</td>
+                                <td class="px-4 py-2 text-blue-300">{{ "%.2f"|format(fila.HW) }}</td>
+                                <td class="px-4 py-2 text-purple-300">{{ "%.2f"|format(fila.LSTM) }}</td>
                             </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
-            {% endfor %}
 
-            {# Ahora mostramos la primera tabla al final #}
-            {% set primera = variedades[0] %}
-            <h6>{{ primera[0] }}</h6>
-            <div class="table-responsive mb-10">
-                <table class="display stripe hover">
-                    <thead>
-                        <tr>
-                            <th>GRUPO</th>
-                            <th>HW</th>
-                            <th>LSTM</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for fila in primera[1] %}
-                        <tr>
-                            <td>{{ loop.index }}</td>  {# numeración automática #}
-                            <td>{{ fila.HW }}</td>
-                            <td>{{ fila.LSTM }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
             </div>
 
         </div>
-    </main>
 
-    <!-- FOOTER -->
-    <footer class="py-6 text-center text-sm">
-        &copy; 2025 Sistema de Predicción de Producción de Rosas. Todos los derechos reservados - Samuel Torres.
-    </footer>
+        {% endfor %}
+    </div>
 
-    <!-- JS -->
-    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
-    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.print.min.js"></script>
+</div>
 
-    <script>
-        $(document).ready(function () {
-            $('table.display').DataTable({
-                dom: 'Bfrtip',
-                buttons: ['excelHtml5', 'csvHtml5', 'print'],
-                pageLength: 8,
-                language: {
-                    search: "🔍 Buscar:",
-                    lengthMenu: "Mostrar _MENU_ filas",
-                    info: "Mostrando _START_ a _END_ de _TOTAL_ entradas",
-                    paginate: {
-                        first: "Primero",
-                        last: "Último",
-                        next: "Siguiente",
-                        previous: "Anterior"
+
+<script>
+    // Datos de Flask
+    const tablas = {{ tabla_semanal | tojson }};
+
+    let index = 1;
+
+    // Crear gráfico para cada variedad
+    for (const [variedad, registros] of Object.entries(tablas)) {
+
+        const semanas = registros.map(r => "S" + r.SEMANA);
+        const datosHW = registros.map(r => r.HW);
+        const datosLSTM = registros.map(r => r.LSTM);
+
+        new Chart(document.getElementById("graf" + index), {
+            type: "line",
+            data: {
+                labels: semanas,
+                datasets: [
+                    {
+                        label: "HW",
+                        data: datosHW,
+                        borderColor: "#3b82f6",
+                        backgroundColor: "rgba(59,130,246,0.4)",
+                        tension: 0.3,
+                        fill: true
+                    },
+                    {
+                        label: "LSTM",
+                        data: datosLSTM,
+                        borderColor: "#a855f7",
+                        backgroundColor: "rgba(168,85,247,0.4)",
+                        tension: 0.3,
+                        fill: true
                     }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { labels: { color: "#fff" } } },
+                scales: {
+                    x: { ticks: { color: "#ccc" } },
+                    y: { ticks: { color: "#ccc" } }
                 }
-            });
+            }
         });
-    </script>
+
+        index++;
+    }
+</script>
 
 </body>
 </html>
+
