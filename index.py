@@ -635,7 +635,7 @@ def prediccion_grafica():
     if 'usuario' not in session:
         return redirect(url_for('login'))
 
-    # Rango de semanas
+    # Selección de rango de semanas
     limite_semanas = 53
     rango_seleccionado = '1-52'
 
@@ -644,19 +644,21 @@ def prediccion_grafica():
         if rango_seleccionado == '1-27':
             limite_semanas = 27
 
-    # === 1. Leer Excel principal (solo este) ===
+    # === 1. Leer Excel principal (único archivo ahora) ===
     try:
         df = pd.read_excel("produccion.xlsx")
     except FileNotFoundError as e:
-        return f"<h1>Error</h1><p>No se encontró: <strong>{e.filename}</strong></p>"
+        return f"<h1>Error</h1><p>No se encontró el archivo: <strong>{e.filename}</strong>.</p>"
 
-    df["FECHA"] = pd.to_datetime(df["AÑO"].astype(str) + df["SEMANA"].astype(str) + "1",
-                                 format="%G%V%w", errors="coerce")
-
+    df["FECHA"] = pd.to_datetime(
+        df["AÑO"].astype(str) + df["SEMANA"].astype(str) + "1",
+        format="%G%V%w",
+        errors="coerce"
+    )
     año_max = df["AÑO"].max()
     df = df[df["AÑO"] >= año_max - 5]
 
-    # === 2. Predicciones por semana sin datos reales ===
+    # === 2. Generar predicciones por variedad y semana ===
     filas = []
 
     for variedad in df["VARIEDAD"].unique():
@@ -665,17 +667,21 @@ def prediccion_grafica():
             df_sem = df[(df["VARIEDAD"] == variedad) & (df["SEMANA"] == semana)]
             serie_full = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
 
+            # Datos recientes
             serie_hw = serie_full[serie_full.index >= año_max - 1]
             serie_lstm = serie_full[serie_full.index >= año_max - 2]
 
+            # Predicciones finales
             if len(serie_full) < 3:
-                hw = lstm = 0
+                hw = 0
+                lstm = 0
             else:
                 try:
-                    hw = round(serie_hw.mean(), 2)
+                    hw = round(serie_hw.mean(), 2) if len(serie_hw) > 0 else 0
                 except:
                     hw = 0
 
+                # LSTM → ahora es solamente un promedio simple
                 try:
                     lstm = round(serie_lstm.mean(), 2)
                 except:
@@ -683,15 +689,21 @@ def prediccion_grafica():
 
             filas.append([variedad, semana, hw, lstm])
 
-    # === 3. DataFrame final (solo predicciones) ===
+    # === 3. DataFrame final ===
     df_pred = pd.DataFrame(filas, columns=["VARIEDAD", "SEMANA", "HW", "LSTM"])
 
     if df_pred.empty:
-        return render_template("prediccion_grafica.html",
-                               error="No se generaron datos.",
-                               rango_actual=rango_seleccionado)
+        return render_template(
+            "prediccion_grafica.html",
+            error="No se generaron datos.",
+            rango_actual=rango_seleccionado
+        )
 
-    # === TABLA SEMANAL POR VARIEDAD ===
+    # ==============================================================================
+    # 4. TABLAS (SIN REAL, SIN DIFERENCIAS, SIN PORCENTAJES)
+    # ==============================================================================
+
+    # === Tabla 1: semana a semana por variedad ===
     tabla_semanal = {
         v: df_pred[df_pred["VARIEDAD"] == v]
             .drop(columns="VARIEDAD")
@@ -699,8 +711,10 @@ def prediccion_grafica():
         for v in df_pred["VARIEDAD"].unique()
     }
 
-    # === TABLA BLOQUES DE 4 SEMANAS ===
+    # Añadimos columna de bloque
     df_pred["BLOQUE"] = ((df_pred["SEMANA"] - 1) // 4) + 1
+
+    # === Tabla 2: sumas cada 4 semanas por variedad ===
     tabla_variedad_df = df_pred.groupby(["VARIEDAD", "BLOQUE"])[["HW", "LSTM"]].sum().reset_index()
     tabla_variedad = {
         v: tabla_variedad_df[tabla_variedad_df["VARIEDAD"] == v]
@@ -709,31 +723,45 @@ def prediccion_grafica():
         for v in tabla_variedad_df["VARIEDAD"].unique()
     }
 
-    # === TABLA TOTAL ANUAL ===
+    # === Tabla 3: total por variedad ===
     tabla_total = df_pred.groupby("VARIEDAD")[["HW", "LSTM"]].sum().reset_index()
 
-    # === TABLA POR TIPO ===
+    # === Tabla 4: total por tipo ===
     df_excel = pd.read_excel("produccion.xlsx")[["VARIEDAD", "TIPO", "COLOR"]].drop_duplicates()
     df_merge = df_pred.merge(df_excel, on="VARIEDAD", how="left")
     tabla_tipo = df_merge.groupby("TIPO")[["HW", "LSTM"]].sum().reset_index()
     tabla_tipo = tabla_tipo[tabla_tipo["TIPO"].isin(["COLORES", "ROJO"])]
 
-    # === TABLA GENERAL SEMANAL ===
+    # === Tabla 5: general semana a semana ===
     tabla_general_semanal = df_pred.groupby("SEMANA")[["HW", "LSTM"]].sum().reset_index()
 
-    # === TABLA BLOQUES GENERAL ===
+    # === Tabla 6: general por bloques ===
     tabla_general_bloques = df_pred.groupby("BLOQUE")[["HW", "LSTM"]].sum().reset_index()
 
-    # === COLOR ===
+    # === Tabla 7: solo COLORES por bloques ===
+    df_colores = df_merge[df_merge["TIPO"] == "COLORES"]
+    tabla_general_colores = df_colores.groupby("BLOQUE")[["HW", "LSTM"]].sum().reset_index()
+
+    # === Tabla 8: total general ===
+    tabla_general_total = pd.DataFrame([df_pred[["HW", "LSTM"]].sum().to_dict()])
+
+    # === Tabla 9: total por COLOR ===
     tabla_color_total = df_merge.groupby("COLOR")[["HW", "LSTM"]].sum().reset_index()
+
+    # === Tabla 10: por COLOR en bloques ===
     tabla_color_bloques = df_merge.groupby(["COLOR", "BLOQUE"])[["HW", "LSTM"]].sum().reset_index()
 
-    # === max semana ===
+    # Color de celdas (opcional)
+    def get_color(value):
+        return "#FFFFFF"
+
+    # === Determinar max_semana dinámicamente ===
     try:
         max_semana = int(df_pred["SEMANA"].max())
     except:
         max_semana = 0
 
+    # === Render ===
     return render_template(
         "prediccion_grafica.html",
         tabla_semanal=tabla_semanal,
@@ -742,8 +770,11 @@ def prediccion_grafica():
         tabla_tipo=tabla_tipo.to_dict(orient="records"),
         tabla_general_semanal=tabla_general_semanal.to_dict(orient="records"),
         tabla_general_bloques=tabla_general_bloques.to_dict(orient="records"),
+        tabla_general_colores=tabla_general_colores.to_dict(orient="records"),
+        tabla_general_total=tabla_general_total.to_dict(orient="records"),
         tabla_color_total=tabla_color_total.to_dict(orient="records"),
         tabla_color_bloques=tabla_color_bloques.to_dict(orient="records"),
+        get_color=get_color,
         max_semana=max_semana,
         rango_actual=rango_seleccionado
     )
@@ -764,23 +795,25 @@ def resumen_dos():
         if rango_seleccionado == '1-53':
             limite_semanas = 53
 
-    # ========= SOLO SE LEE produccion.xlsx =========
+    # ================================
+    # 1. CARGA DE ARCHIVO ÚNICO
+    # ================================
     try:
         df = pd.read_excel("produccion.xlsx")
     except FileNotFoundError as e:
-        return f"<h1>Error</h1><p>No se encontró: <strong>{e.filename}</strong></p>"
+        return f"<h1>Error</h1><p>No se encontró el archivo: <strong>{e.filename}</strong>.</p>"
 
-    df["FECHA"] = pd.to_datetime(
-        df["AÑO"].astype(str) + df["SEMANA"].astype(str) + "1",
-        format="%G%V%w", errors="coerce"
-    )
+    df["FECHA"] = pd.to_datetime(df["AÑO"].astype(str) + df["SEMANA"].astype(str) + "1",
+                                 format="%G%V%w", errors="coerce")
 
     año_max = df["AÑO"].max()
     df = df[df["AÑO"] >= año_max - 5]
 
     filas = []
 
-    # ========= GENERACIÓN DE PREDICCIONES =========
+    # ================================
+    # 2. CÁLCULO DE PREDICCIONES (SOLO HW Y LSTM)
+    # ================================
     for variedad in df["VARIEDAD"].unique():
 
         for semana in range(1, limite_semanas):
@@ -791,21 +824,25 @@ def resumen_dos():
             serie_hw = serie_full[serie_full.index >= año_max - 1]
             serie_lstm = serie_full[serie_full.index >= año_max - 2]
 
-            if len(serie_full) < 3:
-                hw = lstm = 0
+            if len(serie_full) < 2:
+                hw = 0
+                lstm = 0
             else:
                 try:
-                    hw = round(serie_hw.mean(), 2)
+                    hw = round(serie_hw.mean(), 2) if len(serie_hw) > 0 else 0
                 except:
                     hw = 0
 
                 try:
-                    lstm = round(serie_lstm.mean(), 2)
+                    lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
                 except:
                     lstm = 0
 
             filas.append([variedad, semana, hw, lstm])
 
+    # ================================
+    # 3. DATAFRAME FINAL (SIN REAL, SIN LR)
+    # ================================
     df_pred = pd.DataFrame(filas, columns=[
         "VARIEDAD", "SEMANA", "HW", "LSTM"
     ])
@@ -815,10 +852,11 @@ def resumen_dos():
                                error="No se generaron datos.",
                                rango_actual=rango_seleccionado)
 
-    # ========= BLOQUES DE 4 SEMANAS =========
-    df_pred["BLOQUE"] = ((df_pred["SEMANA"] - 1) // 4) + 1
+    # ===============================================
+    # 4. TABLAS (TODAS FUNCIONAN SOLO CON HW Y LSTM)
+    # ===============================================
 
-    # ========= TABLA SEMANAL =========
+    # TABLA 1 — Semana a semana por variedad
     tabla_semanal = {
         v: df_pred[df_pred["VARIEDAD"] == v]
             .drop(columns="VARIEDAD")
@@ -826,7 +864,10 @@ def resumen_dos():
         for v in df_pred["VARIEDAD"].unique()
     }
 
-    # ========= TABLA POR VARIEDAD EN BLOQUES =========
+    # BLOQUES DE 4 SEMANAS
+    df_pred["BLOQUE"] = ((df_pred["SEMANA"] - 1) // 4) + 1
+
+    # TABLA 2 — Suma por variedad y bloque
     tabla_variedad_df = df_pred.groupby(["VARIEDAD", "BLOQUE"])[["HW", "LSTM"]].sum().reset_index()
     tabla_variedad = {
         v: tabla_variedad_df[tabla_variedad_df["VARIEDAD"] == v]
@@ -835,45 +876,58 @@ def resumen_dos():
         for v in tabla_variedad_df["VARIEDAD"].unique()
     }
 
-    # ========= TABLA TOTAL ANUAL POR VARIEDAD =========
+    # TABLA 3 — Total anual por variedad
     tabla_total = df_pred.groupby("VARIEDAD")[["HW", "LSTM"]].sum().reset_index()
 
-    # ========= LEER TIPO Y COLOR =========
+    # TABLA 4 — Total por tipo
     df_excel = pd.read_excel("produccion.xlsx")[["VARIEDAD", "TIPO", "COLOR"]].drop_duplicates()
     df_merge = df_pred.merge(df_excel, on="VARIEDAD", how="left")
 
-    # ========= TABLA POR TIPO =========
     tabla_tipo = df_merge.groupby("TIPO")[["HW", "LSTM"]].sum().reset_index()
     tabla_tipo = tabla_tipo[tabla_tipo["TIPO"].isin(["COLORES", "ROJO"])]
 
-    # ========= TABLA GENERAL SEMANAL =========
+    # TABLA 5 — General semana a semana
     tabla_general_semanal = df_pred.groupby("SEMANA")[["HW", "LSTM"]].sum().reset_index()
 
-    # ========= TABLA GENERAL POR BLOQUES =========
+    # TABLA 6 — General por bloques
     tabla_general_bloques = df_pred.groupby("BLOQUE")[["HW", "LSTM"]].sum().reset_index()
 
-    # ========= TABLA TOTAL POR COLOR =========
+    # TABLA 7 — Solo colores en bloques
+    df_colores = df_merge[df_merge["TIPO"] == "COLORES"]
+    tabla_general_colores = df_colores.groupby("BLOQUE")[["HW", "LSTM"]].sum().reset_index()
+
+    # TABLA 8 — Total general
+    tabla_general_total = pd.DataFrame([df_pred[["HW", "LSTM"]].sum().to_dict()])
+
+    # TABLA 9 — Total por color
     tabla_color_total = df_merge.groupby("COLOR")[["HW", "LSTM"]].sum().reset_index()
 
-    # ========= TABLA COLOR POR BLOQUES =========
+    # TABLA 10 — Color por bloques
     tabla_color_bloques = df_merge.groupby(["COLOR", "BLOQUE"])[["HW", "LSTM"]].sum().reset_index()
 
-    # ========= MAX SEMANA =========
+    # COLOR DE CELDAS (MANTENIDO POR SI AÚN LO USAS)
+    def get_color(value):
+        return "#FFFFFF"
+
+    # MÁXIMO SEMANA
     try:
         max_semana = int(df_pred["SEMANA"].max())
     except:
         max_semana = 0
 
-    # ========= DATOS INTERACTIVOS (SOLO HW Y LSTM) =========
+    # DATOS INTERACTIVOS LIMPIOS
     datos_interactivos = {
         "tabla_total": tabla_total.to_dict(orient="records"),
         "tabla_tipo": tabla_tipo.to_dict(orient="records"),
         "tabla_general_semanal": tabla_general_semanal.to_dict(orient="records"),
         "tabla_general_bloques": tabla_general_bloques.to_dict(orient="records"),
+        "tabla_general_colores": tabla_general_colores.to_dict(orient="records"),
+        "tabla_general_total": tabla_general_total.to_dict(orient="records"),
         "tabla_color_total": tabla_color_total.to_dict(orient="records"),
         "tabla_color_bloques": tabla_color_bloques.to_dict(orient="records")
     }
 
+    # RENDER FINAL
     return render_template(
         "resumen_dos.html",
         tabla_semanal=tabla_semanal,
@@ -882,8 +936,11 @@ def resumen_dos():
         tabla_tipo=tabla_tipo.to_dict(orient="records"),
         tabla_general_semanal=tabla_general_semanal.to_dict(orient="records"),
         tabla_general_bloques=tabla_general_bloques.to_dict(orient="records"),
+        tabla_general_colores=tabla_general_colores.to_dict(orient="records"),
+        tabla_general_total=tabla_general_total.to_dict(orient="records"),
         tabla_color_total=tabla_color_total.to_dict(orient="records"),
         tabla_color_bloques=tabla_color_bloques.to_dict(orient="records"),
+        get_color=get_color,
         datos_interactivos=datos_interactivos,
         max_semana=max_semana,
         rango_actual=rango_seleccionado
