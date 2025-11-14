@@ -2,119 +2,75 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🌹 Producción Histórica</title>
+    <title>Producción por Variedad</title>
 
+    <!-- TailwindCSS -->
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+
+    <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 
     <style>
         body {
             font-family: 'Poppins', sans-serif;
-            background-color: #0f172a;
-            background-image: radial-gradient(circle at 25% 25%, rgba(59,130,246,0.15), transparent 40%),
-                              radial-gradient(circle at 75% 75%, rgba(139,92,246,0.15), transparent 40%);
-            color: #f1f5f9;
+            background-color: #111827; /* gris oscuro */
+            color: #f9fafb;
         }
-        header {
-            background: rgba(30,41,59,0.7);
-            backdrop-filter: blur(12px);
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            box-shadow: 0 4px 10px rgba(0,0,0,0.4);
-        }
-        .container {
-            background: rgba(30,41,59,0.85);
-            border-radius: 1.25rem;
-            backdrop-filter: blur(15px);
-            padding: 2.5rem;
-            margin: 2.5rem auto;
-            max-width: 1200px;
-            border: 1px solid rgba(255,255,255,0.1);
-            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-        }
-        h1, h2 {
-            background: linear-gradient(90deg, #60a5fa, #a78bfa);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .grafica {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 1.2rem;
-            border: 1px solid rgba(255,255,255,0.1);
+        .card {
+            background: #1f2937;
+            border-radius: 1rem;
             padding: 1.5rem;
-            margin-bottom: 2.5rem;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
-            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+            transition: transform .2s;
         }
-        .grafica:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 10px 25px rgba(96,165,250,0.3);
+        .card:hover {
+            transform: translateY(-3px);
         }
-        .grafica h3 {
-            text-align: center;
-            font-size: 1.2rem;
-            color: #e2e8f0;
-            margin-bottom: 1rem;
-        }
-        .back-button a {
-            background: linear-gradient(90deg, #ef4444, #dc2626);
+        .selector {
+            background: #1f2937;
             color: white;
-            padding: 12px 28px;
-            border-radius: 9999px;
-            font-weight: 500;
-            text-decoration: none;
-            transition: all 0.3s ease;
-        }
-        footer {
-            background: rgba(30,41,59,0.8);
-            backdrop-filter: blur(10px);
-            color: rgba(203,213,225,0.8);
-            border-top: 1px solid rgba(255,255,255,0.1);
+            border: 1px solid #374151;
+            padding: .6rem 1rem;
+            border-radius: .5rem;
         }
     </style>
 </head>
 
-<body class="min-h-screen flex flex-col">
+<body class="min-h-screen py-10 px-6">
 
-    <header class="py-4 px-6 flex justify-between items-center">
-        <div class="flex items-center gap-3">
-            <img src="{{ url_for('static', filename='imagen.png') }}" class="w-12 h-12 rounded-full">
-            <div>
-                <h1 class="text-2xl font-bold">Producción Histórica</h1>
-                <p class="text-gray-400 text-sm">Gráficas semanales</p>
-            </div>
+    <div class="max-w-5xl mx-auto">
+
+        <h1 class="text-3xl font-bold text-center mb-10">Producción Semanal por Variedad</h1>
+
+        <!-- Card del selector -->
+        <div class="card mb-10">
+            <h2 class="text-xl font-semibold mb-4 text-blue-400">Selecciona una variedad</h2>
+
+            <form method="get" action="/produccion">
+                <select name="variedad" class="selector w-full" onchange="this.form.submit()">
+                    <option value="">-- Seleccionar variedad --</option>
+
+                    {% for v in variedades %}
+                        <option value="{{ v }}" {% if v == variedad_sel %}selected{% endif %}>{{ v }}</option>
+                    {% endfor %}
+                </select>
+            </form>
         </div>
 
-        <a href="{{ url_for('dashboard') }}" class="logout-btn py-2 px-4 flex items-center shadow-md">
-            <i class="fas fa-arrow-left mr-2"></i> Volver
-        </a>
-    </header>
+        <!-- Card de la gráfica -->
+        {% if grafica_html %}
+        <div class="card">
+            <h2 class="text-xl font-semibold mb-4 text-green-400">
+                Gráfica de producción: {{ variedad_sel }}
+            </h2>
 
-    <main class="flex-grow py-10 px-6">
-        <div class="container">
-
-            <h2>📊 Gráficas Semanales por Variedad</h2>
-
-            {% for variedad, grafica in graficas.items() %}
-            <div class="grafica">
-                <h3>{{ variedad }}</h3>
-                {{ grafica|safe }}
-            </div>
-            {% endfor %}
-
-            <div class="text-center mt-8 back-button">
-                <a href="{{ url_for('dashboard') }}">
-                    <i class="fas fa-arrow-left"></i> Volver al Panel
-                </a>
+            <div class="w-full overflow-x-auto">
+                {{ grafica_html | safe }}
             </div>
         </div>
-    </main>
+        {% endif %}
 
-    <footer class="py-6 text-center text-sm">
-        &copy; 2025 Sistema de Predicción de Producción de Rosas. Todos los derechos reservados - Samuel Torres.
-    </footer>
+    </div>
 
 </body>
 </html>

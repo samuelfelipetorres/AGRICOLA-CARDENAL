@@ -51,16 +51,16 @@ def logout():
 # ----------------------------
 # Produccion    PANTALLA arriba 1
 # ----------------------------
-@app.route('/produccion', methods=['GET', 'POST']) 
+@app.route('/produccion', methods=['GET'])
 def produccion():
     if 'usuario' not in session:
         return redirect(url_for('login'))
 
     try:
-        # Leer el archivo Excel
+        # Leer Excel
         df = pd.read_excel('produccion.xlsx')
 
-        # Normalizar nombres y texto
+        # Normalizar columnas
         df.columns = df.columns.str.strip().str.upper()
         for col in ['MES', 'COLOR', 'TIPO', 'VARIEDAD']:
             if col in df.columns:
@@ -68,72 +68,54 @@ def produccion():
 
         df['TALLOS'] = pd.to_numeric(df['TALLOS'], errors='coerce').fillna(0)
 
-        # Mes a número
-        meses_map = {
-            'ENERO': 1, 'FEBRERO': 2, 'MARZO': 3, 'ABRIL': 4, 'MAYO': 5, 'JUNIO': 6,
-            'JULIO': 7, 'AGOSTO': 8, 'SEPTIEMBRE': 9, 'OCTUBRE': 10, 'NOVIEMBRE': 11, 'DICIEMBRE': 12
-        }
-        df['MES_NUM'] = df['MES'].map(meses_map)
-
-        # Validación
-        columnas_requeridas = {'AÑO', 'MES', 'SEMANA', 'COLOR', 'TIPO', 'VARIEDAD', 'TALLOS'}
-        if not columnas_requeridas.issubset(df.columns):
-            return "El archivo no contiene todas las columnas necesarias."
-
-        # FILTRAR DESDE 2019
-        df = df[df['AÑO'] >= 2022]
-
-        # Limpieza
-        df['SEMANA'] = pd.to_numeric(df['SEMANA'], errors='coerce')
-        df.dropna(subset=['SEMANA'], inplace=True)
-        df = df[(df['SEMANA'] >= 1) & (df['SEMANA'] <= 52)]
-        df['SEMANA'] = df['SEMANA'].astype(int)
-        df = df.sort_values(by=['AÑO', 'MES_NUM', 'SEMANA'])
-
-        # ----- SOLO GRÁFICAS -----
+        # Crear lista de variedades
         variedades = sorted(df['VARIEDAD'].unique())
-        graficas = {}
 
-        for variedad in variedades:
-            datos_var = df[df['VARIEDAD'] == variedad]
+        # Obtener variedad seleccionada
+        variedad_sel = request.args.get("variedad")
 
+        grafica_html = None
+
+        if variedad_sel:
+            datos_var = df[df['VARIEDAD'] == variedad_sel]
             resumen = datos_var.groupby(['AÑO', 'SEMANA'], as_index=False)['TALLOS'].sum()
-            if resumen.empty:
-                continue
 
-            fig = go.Figure()
+            if not resumen.empty:
+                fig = go.Figure()
 
-            # Líneas por año
-            for anio in sorted(resumen['AÑO'].unique()):
-                datos_anio = resumen[resumen['AÑO'] == anio].sort_values('SEMANA')
-                fig.add_trace(go.Scatter(
-                    x=datos_anio['SEMANA'],
-                    y=datos_anio['TALLOS'],
-                    mode='lines+markers',
-                    name=f"Año {anio}"
-                ))
+                # Líneas por año
+                for anio in sorted(resumen['AÑO'].unique()):
+                    datos_anio = resumen[resumen['AÑO'] == anio].sort_values('SEMANA')
 
-            fig.update_layout(
-                title=f"Producción semanal - {variedad}",
-                xaxis_title='Semana',
-                yaxis_title='Tallos',
-                template='plotly_white',
-                hovermode='x unified',
-                xaxis=dict(
-                    tickmode='linear',
-                    tick0=1,
-                    dtick=1,
-                    range=[1, 52]
-                ),
-                margin=dict(l=40, r=20, t=50, b=40)
-            )
-            
-            graficas[variedad] = plot(fig, output_type='div', include_plotlyjs=True)
+                    fig.add_trace(go.Scatter(
+                        x=datos_anio['SEMANA'],
+                        y=datos_anio['TALLOS'],
+                        mode='lines+markers',
+                        name=f"Año {anio}"
+                    ))
 
-        return render_template('produccion.html', graficas=graficas)
+                fig.update_layout(
+                    title=f"Producción semanal - {variedad_sel}",
+                    xaxis_title='Semana',
+                    yaxis_title='Tallos',
+                    template='plotly_white',
+                    hovermode='x unified'
+                )
+
+                # Cargar plotly una sola vez
+                grafica_html = plot(fig, output_type='div', include_plotlyjs=True)
+
+        # Render
+        return render_template(
+            'produccion.html',
+            variedades=variedades,
+            variedad_sel=variedad_sel,
+            grafica_html=grafica_html
+        )
 
     except Exception as e:
         return f"Error al procesar la producción: {e}"
+
 
 
     
