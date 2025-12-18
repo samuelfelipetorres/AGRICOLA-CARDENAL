@@ -4,159 +4,128 @@
 <meta charset="UTF-8">
 <title>Predicciones por Variedad</title>
 
-<!-- Tailwind CSS -->
 <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-
-<!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;600;700&display=swap" rel="stylesheet">
 
 <style>
-    body {
-        font-family: 'Poppins', sans-serif;
-        background-color: #111827;
-        color: #f9fafb;
-    }
-    .card {
-        background: #1f2937;
-        border-radius: 1rem;
-        padding: 1.5rem;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    }
-    .card:hover {
-        transform: translateY(-3px);
-        transition: 0.2s;
-    }
-    canvas { max-height: 270px; }
+body {
+    font-family: 'Poppins', sans-serif;
+    background-color: #111827;
+    color: #f9fafb;
+}
+.card {
+    background: #1f2937;
+    border-radius: 1rem;
+    padding: 1.5rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.selector {
+    background-color: #2563eb;
+    color: white;
+    border: none;
+    padding: .7rem 1rem;
+    border-radius: .5rem;
+}
+.selector option {
+    background-color: #1e40af;
+    color: white;
+}
+canvas { max-height: 270px; }
 </style>
-
 </head>
 
 <body class="min-h-screen py-10 px-6">
-
 <div class="max-w-7xl mx-auto">
 
-    <h1 class="text-3xl font-bold text-center mb-10">Predicción por Variedad</h1>
+<h1 class="text-3xl font-bold text-center mb-10">Predicción por Variedad</h1>
 
-    <!-- TARJETAS DE RESUMEN -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-        <div class="card text-center">
-            <h3 class="text-gray-400">Total de Variedades</h3>
-            <p class="text-3xl font-bold text-blue-400">{{ tabla_semanal|length }}</p>
-        </div>
+<!-- SELECTOR -->
+<div class="card mb-10">
+    <h2 class="text-xl font-semibold mb-4 text-blue-400">Selecciona una variedad</h2>
 
-        <div class="card text-center">
-            <h3 class="text-gray-400">Semana Real Actual</h3>
-            <p class="text-3xl font-bold text-green-400">{{ max_semana }}</p>
-        </div>
+    <form method="get">
+        <select name="variedad" class="selector w-full" onchange="this.form.submit()">
+            <option value="">-- Seleccione una variedad --</option>
+            {% for v in variedades %}
+                <option value="{{ v }}" {% if v == variedad_sel %}selected{% endif %}>
+                    {{ v }}
+                </option>
+            {% endfor %}
+        </select>
+    </form>
+</div>
 
-        <div class="card text-center">
-            <h3 class="text-gray-400">Semanas Predecidas</h3>
-            <p class="text-3xl font-bold text-yellow-400">8</p>
-        </div>
-    </div>
+{% if tabla_semanal %}
+<div class="space-y-10">
+{% for variedad, registros in tabla_semanal.items() %}
 
+<div class="card">
+<h2 class="text-xl font-semibold mb-3 text-blue-300">{{ variedad }}</h2>
 
-    <!-- TARJETAS POR CADA VARIEDAD -->
-    <div class="space-y-10">
-        {% for variedad, registros in tabla_semanal.items() %}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+<div>
+<canvas id="graf{{ loop.index }}"></canvas>
+</div>
 
-        <div class="card">
+<div class="overflow-x-auto">
+<table class="min-w-full text-sm">
+<thead class="border-b border-gray-600">
+<tr>
+<th class="px-4 py-2">Año</th>
+<th class="px-4 py-2">Semana</th>
+<th class="px-4 py-2 text-blue-400">HW</th>
+<th class="px-4 py-2 text-purple-400">LSTM</th>
+</tr>
+</thead>
+<tbody>
+{% for fila in registros %}
+<tr class="border-b border-gray-800">
+<td class="px-4 py-2">{{ fila.AÑO }}</td>
+<td class="px-4 py-2">{{ fila.SEMANA }}</td>
+<td class="px-4 py-2 text-blue-300">{{ "%.2f"|format(fila.HW) }}</td>
+<td class="px-4 py-2 text-purple-300">{{ "%.2f"|format(fila.LSTM) }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+</div>
 
-            <h2 class="text-xl font-semibold mb-3 text-blue-300">{{ variedad }}</h2>
-
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-
-                <!-- GRAFICO -->
-                <div>
-                    <canvas id="graf{{ loop.index }}"></canvas>
-                </div>
-
-                <!-- TABLA -->
-                <div class="overflow-x-auto">
-                    <table class="min-w-full text-sm">
-                        <thead class="border-b border-gray-600">
-                            <tr>
-                                <th class="px-4 py-2 text-gray-300">Año</th>
-                                <th class="px-4 py-2 text-gray-300">Semana</th>
-                                <th class="px-4 py-2 text-blue-400">HW</th>
-                                <th class="px-4 py-2 text-purple-400">LSTM</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for fila in registros %}
-                            <tr class="border-b border-gray-800">
-                                <td class="px-4 py-2">{{ fila.AÑO }}</td>
-                                <td class="px-4 py-2">{{ fila.SEMANA }}</td>
-                                <td class="px-4 py-2 text-blue-300">{{ "%.2f"|format(fila.HW) }}</td>
-                                <td class="px-4 py-2 text-purple-300">{{ "%.2f"|format(fila.LSTM) }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-
-            </div>
-
-        </div>
-
-        {% endfor %}
-    </div>
+{% endfor %}
+</div>
+{% endif %}
 
 </div>
 
-
 <script>
-    // Datos de Flask
-    const tablas = {{ tabla_semanal | tojson }};
+const tablas = {{ tabla_semanal | tojson }};
+let index = 1;
 
-    let index = 1;
-
-    // Crear gráfico para cada variedad
-    for (const [variedad, registros] of Object.entries(tablas)) {
-
-        const semanas = registros.map(r => "S" + r.SEMANA);
-        const datosHW = registros.map(r => r.HW);
-        const datosLSTM = registros.map(r => r.LSTM);
-
-        new Chart(document.getElementById("graf" + index), {
-            type: "line",
-            data: {
-                labels: semanas,
-                datasets: [
-                    {
-                        label: "HW",
-                        data: datosHW,
-                        borderColor: "#3b82f6",
-                        backgroundColor: "rgba(59,130,246,0.4)",
-                        tension: 0.3,
-                        fill: true
-                    },
-                    {
-                        label: "LSTM",
-                        data: datosLSTM,
-                        borderColor: "#a855f7",
-                        backgroundColor: "rgba(168,85,247,0.4)",
-                        tension: 0.3,
-                        fill: true
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                plugins: { legend: { labels: { color: "#fff" } } },
-                scales: {
-                    x: { ticks: { color: "#ccc" } },
-                    y: { ticks: { color: "#ccc" } }
-                }
+for (const registros of Object.values(tablas)) {
+    new Chart(document.getElementById("graf" + index), {
+        type: "line",
+        data: {
+            labels: registros.map(r => "S" + r.SEMANA),
+            datasets: [
+                { label: "HW", data: registros.map(r => r.HW), borderColor: "#3b82f6", tension: .3 },
+                { label: "LSTM", data: registros.map(r => r.LSTM), borderColor: "#a855f7", tension: .3 }
+            ]
+        },
+        options: {
+            plugins: { legend: { labels: { color: "#fff" } } },
+            scales: {
+                x: { ticks: { color: "#ccc" } },
+                y: { ticks: { color: "#ccc" } }
             }
-        });
-
-        index++;
-    }
+        }
+    });
+    index++;
+}
 </script>
 
 </body>
 </html>
+
 

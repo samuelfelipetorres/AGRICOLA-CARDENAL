@@ -15,15 +15,12 @@ from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import GradientBoostingRegressor
 import numpy as np
 
-
 app = Flask(__name__)
 app.secret_key = 'tu_clave_secreta_segura'
-
 # Usuarios de prueba
 usuarios = {
     "admin": "agricola1234"
 }
-
 @app.route('/', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -35,21 +32,17 @@ def login():
         else:
             return render_template('login.html', error='Usuario o contraseña incorrectos')
     return render_template('login.html')
-
 @app.route('/dashboard')
 def dashboard():
     if 'usuario' in session:
         return render_template('dashboard.html', usuario=session['usuario'])
     return redirect(url_for('login'))
-
 @app.route('/logout')
 def logout():
     session.pop('usuario', None)
     return redirect(url_for('login'))
-
 # ----------------------------
-# ----------------------------
-# Produccion    PANTALLA arriba 1
+# PANTALLA ARRIBA 1
 # ----------------------------
 @app.route('/produccion', methods=['GET'])
 def produccion():
@@ -112,54 +105,66 @@ def produccion():
             variedad_sel=variedad_sel,
             grafica_html=grafica_html
         )
-
     except Exception as e:
         return f"Error al procesar la producción: {e}"
-
-
-
-    
+   
 # ----------------------------
-# Producción - Gráfica semanal interactiva   PANTALLA abajo 1
+#  PANTALLA ABAJO 1
 # ----------------------------
 @app.route('/produccion_dos', methods=['GET', 'POST'])
 def produccion_dos():
     if 'usuario' not in session:
         return redirect(url_for('login'))
 
-    # === 1. Leer Excel principal ===
+    import pandas as pd
+    import math
+
+    # =============================
+    # 1. Leer datos históricos
+    # =============================
     df = pd.read_excel("produccion.xlsx")
-    
+
     df["FECHA"] = pd.to_datetime(
         df["AÑO"].astype(str) + df["SEMANA"].astype(str) + "1",
-        format="%G%V%w", errors="coerce"
+        format="%G%V%w",
+        errors="coerce"
     )
 
-    # Identificar año de predicción (último año del excel)
-    año_actual_incompleto = df["AÑO"].max()
-    año_max_entrenamiento = año_actual_incompleto - 1
+    año_actual = df["AÑO"].max()
+    año_max_entrenamiento = año_actual - 1
 
-    # Entrenamiento = últimos 5 años completos
-    df_entrenamiento = df[df["AÑO"] <= año_max_entrenamiento]
-    df_entrenamiento = df_entrenamiento[df_entrenamiento["AÑO"] >= año_max_entrenamiento - 4]
+    df_entrenamiento = df[
+        (df["AÑO"] <= año_max_entrenamiento) &
+        (df["AÑO"] >= año_max_entrenamiento - 3)
+    ]
 
-    # === 1b. Leer datos reales ===
+    # =============================
+    # 2. Leer datos reales
+    # =============================
     df_reales = pd.read_excel("datos_reales.xlsx")
+
     df_reales["FECHA"] = pd.to_datetime(
         df_reales["AÑO"].astype(str) + df_reales["SEMANA"].astype(str) + "1",
-        format="%G%V%w", errors="coerce"
+        format="%G%V%w",
+        errors="coerce"
     )
-    df_reales = df_reales[df_reales["AÑO"] == año_actual_incompleto]
 
-    # === 2. Predicciones ===
-    filas = []
+    df_reales = df_reales[df_reales["AÑO"] == año_actual]
 
+    # =============================
+    # 3. Error %
+    # =============================
     def error_pct(real, pred):
-        if real == 0:
-            return 0 if pred == 0 else 100.0
+        if real is None or pred is None or real == 0:
+            return None
         return round(abs(real - pred) / real * 100, 2)
 
-    for variedad in df_entrenamiento["VARIEDAD"].unique():
+    # =============================
+    # 4. Predicción semanal base
+    # =============================
+    filas = []
+
+    for variedad in sorted(df_entrenamiento["VARIEDAD"].unique()):
         for semana in range(1, 53):
 
             df_sem = df_entrenamiento[
@@ -167,302 +172,277 @@ def produccion_dos():
                 (df_entrenamiento["SEMANA"] == semana)
             ]
 
-            serie_full = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
+            serie = (
+                df_sem.sort_values("AÑO")
+                .set_index("AÑO")["TALLOS"]
+                .dropna()
+            )
 
-            serie_hw = serie_full[serie_full.index >= año_max_entrenamiento - 1]
-            serie_lstm = serie_full[serie_full.index >= año_max_entrenamiento - 2]
-
-            if len(serie_full) < 3:
-                hw = lstm = 0
+            if len(serie) < 3:
+                hw = None
+                lstm = None
             else:
-                hw = round(serie_hw.mean(), 2) if len(serie_hw) > 0 else 0
-                lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
+                hw = round(serie[serie.index >= año_max_entrenamiento].mean(), 2)
+                lstm = round(serie[serie.index >= año_max_entrenamiento - 1].mean(), 2)
 
             real_data = df_reales[
                 (df_reales["VARIEDAD"] == variedad) &
                 (df_reales["SEMANA"] == semana)
             ]
-            real = real_data["TALLOS"].sum() if not real_data.empty else 0
 
-            dif_hw = real - hw
-            dif_lstm = real - lstm
+            real = real_data["TALLOS"].sum() if not real_data.empty else None
+
+            filas.append([variedad, semana, hw, lstm, real])
+
+    df_base = pd.DataFrame(filas, columns=["VARIEDAD", "SEMANA", "HW", "LSTM", "REAL"])
+
+    # =============================
+    # 5. Construir tablas agregadas (ANTI NaN)
+    # =============================
+    def build_table(df, label):
+        tabla = []
+        for key, g in df.groupby(label):
+            hw = g["HW"].sum(min_count=1)
+            lstm = g["LSTM"].sum(min_count=1)
+            real = g["REAL"].sum(min_count=1)
+
+            hw = None if pd.isna(hw) else hw
+            lstm = None if pd.isna(lstm) else lstm
+            real = None if pd.isna(real) else real
+
             acc_hw = error_pct(real, hw)
             acc_lstm = error_pct(real, lstm)
 
-            filas.append([
-                variedad, semana, hw, lstm, real,
-                dif_hw, dif_lstm, acc_hw, acc_lstm
-            ])
+            tabla.append({
+                label: int(key),
+                "HW": hw,
+                "LSTM": lstm,
+                "REAL": real,
+                "DIF_HW": real - hw if real is not None and hw is not None else None,
+                "DIF_LSTM": real - lstm if real is not None and lstm is not None else None,
+                "ACC_HW": acc_hw,
+                "ACC_LSTM": acc_lstm
+            })
+        return tabla
 
-    # === 3. DataFrame final ===
-    df_pred = pd.DataFrame(filas, columns=[
-        "VARIEDAD", "SEMANA", "HW", "LSTM", "REAL",
-        "DIF_HW", "DIF_LSTM", "ACC_HW", "ACC_LSTM"
-    ])
+    variedades = sorted(df_base["VARIEDAD"].unique())
+    variedad_sel = request.form.get("variedad")
 
-    # === SOLO TABLA 1 ORDENADA ALFABÉTICAMENTE ===
-    tabla_semanal = {}
-    for variedad in sorted(df_pred["VARIEDAD"].unique()):  # ← ← ORDEN ALFABÉTICO
-        tabla_semanal[variedad] = (
-            df_pred[df_pred["VARIEDAD"] == variedad]
-            .drop(columns="VARIEDAD")
-            .sort_values("SEMANA")  # ordenar semanas
-            .to_dict(orient="records")
-        )
+    tabla_12 = tabla_26 = tabla_52 = []
 
-    # === función color ===
-    def get_color(value):
-        if value <= 20: return "#d4edda"
-        elif 21 <= value <= 30: return "#fff3cd"
-        elif 31 <= value <= 50: return "#f8d7da"
-        else: return "#f5c6cb"
+    if variedad_sel:
+        df_v = df_base[df_base["VARIEDAD"] == variedad_sel].copy()
 
-    # Semanas reales
-    try:
-        max_semana = int(df_reales["SEMANA"].max())
-        if pd.isna(max_semana) or max_semana < 1:
-            max_semana = 52
-    except:
-        max_semana = 52
+        df_v["MES"] = ((df_v["SEMANA"] - 1) // 4) + 1
+        tabla_12 = build_table(df_v, "MES")
+
+        df_v["Q"] = ((df_v["SEMANA"] - 1) // 2) + 1
+        tabla_26 = build_table(df_v, "Q")
+
+        tabla_52 = build_table(df_v, "SEMANA")
+
+    # =============================
+    # 6. Color SOLO con valor válido
+    # =============================
+    def get_color(val):
+        if val is None or isinstance(val, float) and math.isnan(val):
+            return "transparent"
+        if val <= 25:
+            return "#bbf7d0"
+        elif val <= 30:
+            return "#fde68a"
+        elif val <= 50:
+            return "#fecaca"
+        return "#fca5a5"
 
     return render_template(
         "produccion_dos.html",
-        tabla_semanal=tabla_semanal,
-        get_color=get_color,
-        max_semana=max_semana
+        variedades=variedades,
+        variedad_sel=variedad_sel,
+        tabla_12=tabla_12,
+        tabla_26=tabla_26,
+        tabla_52=tabla_52,
+        get_color=get_color
     )
 
 
-
 # ----------------------------
-# Prediccion - Tabla      PANTALLA 2 arriba
+# PANTALLA 2 ARRIBA
 # ----------------------------
 @app.route('/prediccion_tabla')
 def prediccion_tabla():
     if 'usuario' not in session:
         return redirect(url_for('login'))
 
-    # === 1. Leer Excel principal y no filtrarlo todavía ===
-    df_original = pd.read_excel("produccion.xlsx")
-    # Columnas esperadas: AÑO | MES | SEMANA | COLOR | TIPO | VARIEDAD | TALLOS
+    import pandas as pd
+    from flask import request, render_template
 
-    # Crear columna FECHA en el dataframe original
-    df_original["FECHA"] = pd.to_datetime(
-        df_original["AÑO"].astype(str) + df_original["SEMANA"].astype(str) + "1",
-        format="%G%V%w", errors="coerce"
+    # === 1. Leer Excel ===
+    df_original = pd.read_excel("produccion.xlsx")
+
+    df_original.columns = df_original.columns.str.strip().str.upper()
+    df_original["VARIEDAD"] = df_original["VARIEDAD"].astype(str).str.strip().str.upper()
+
+    # Última semana real
+    ultimo_año_real = df_original["AÑO"].max()
+    ultima_semana_real = (
+        df_original[df_original["AÑO"] == ultimo_año_real]["SEMANA"].max()
     )
 
-    # Determinar última semana real antes de filtrar
-    ultimo_año_real = df_original["AÑO"].max()
-    ultima_semana_real = df_original[df_original["AÑO"] == ultimo_año_real]["SEMANA"].max()
-
-    # === 1b. Crear un DataFrame HISTÓRICO solo con años completos para entrenar ===
+    # === 2. Histórico (años completos) ===
     semanas_por_año = df_original.groupby("AÑO")["SEMANA"].nunique()
     años_completos = semanas_por_año[semanas_por_año >= 52].index
     df_historico = df_original[df_original["AÑO"].isin(años_completos)].copy()
 
-    # Filtrar últimos 5 años completos en el histórico
     año_max_historico = df_historico["AÑO"].max()
     df_historico = df_historico[df_historico["AÑO"] >= año_max_historico - 5]
 
-    # === 2. Generar predicciones ===
+    # === 3. Predicciones semanales (8 semanas) ===
     filas = []
 
-    # Iterar sobre las variedades del histórico
     for variedad in df_historico["VARIEDAD"].unique():
 
-        semana_actual_pred = ultima_semana_real + 1
-        año_actual_pred = ultimo_año_real
-        semanas_a_generar = 8
+        semana_actual = ultima_semana_real + 1
+        año_actual = ultimo_año_real
 
-        for i in range(semanas_a_generar):
+        for _ in range(8):
 
-            semana_a_predecir = semana_actual_pred
-            año_a_predecir = año_actual_pred
+            semana = semana_actual
+            año = año_actual
 
-            # Si la semana supera 52, pasa al siguiente año
-            if semana_a_predecir > 52:
-                semana_a_predecir -= 52
-                año_a_predecir += 1
+            if semana > 52:
+                semana -= 52
+                año += 1
 
-            # Preparación de datos para modelos
             df_sem = df_historico[
                 (df_historico["VARIEDAD"] == variedad) &
-                (df_historico["SEMANA"] == semana_a_predecir)
+                (df_historico["SEMANA"] == semana)
             ]
 
-            serie_full = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
+            serie = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
 
-            serie_hw = serie_full[serie_full.index >= año_max_historico - 1]
-            serie_lstm = serie_full[serie_full.index >= año_max_historico - 2]
+            hw = serie.tail(2).mean() if len(serie) >= 2 else 0
+            lstm = serie.tail(3).mean() if len(serie) >= 3 else 0
 
-            if len(serie_full) < 3:
-                hw = 0
-                lstm = 0
-            else:
-                # Promedio simple (2 años)
-                try:
-                    hw = round(serie_hw.mean(), 2) if len(serie_hw) > 0 else 0
-                except:
-                    hw = 0
+            filas.append([variedad, hw, lstm])
+            semana_actual += 1
 
-                #  SE ELIMINA COMPLETAMENTE EL GRADIENT BOOSTING
-                # lr = None    # ya no se usa
+    df_pred = pd.DataFrame(filas, columns=["VARIEDAD", "HW", "LSTM"])
 
-                # Reemplazo LSTM: promedio simple usando 3 años
-                try:
-                    lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
-                except:
-                    lstm = 0
+    # === 4. Agrupar por MES (4 semanas por mes) ===
+    resultado = {}
 
-            #  SE ELIMINA TODO LO RELACIONADO CON DATOS REALES, DIFERENCIAS Y ACCURACY
-
-            filas.append([
-                variedad, año_a_predecir, semana_a_predecir, hw, lstm
-            ])
-
-            semana_actual_pred += 1
-
-    # === TABLA 1: semana a semana por variedad ===
-    df_pred = pd.DataFrame(filas, columns=[
-        "VARIEDAD", "AÑO", "SEMANA", "HW", "LSTM"
-    ])
-
-    tabla_semanal = {}
     for variedad in df_pred["VARIEDAD"].unique():
-        tabla_semanal[variedad] = df_pred[df_pred["VARIEDAD"] == variedad] \
-            .drop(columns="VARIEDAD") \
-            .to_dict(orient="records")
+        df_v = df_pred[df_pred["VARIEDAD"] == variedad].reset_index(drop=True)
 
-    # ORDENAR LAS TABLAS ALFABÉTICAMENTE POR NOMBRE DE VARIEDAD
-    tabla_semanal = dict(sorted(tabla_semanal.items()))
+        mes_1 = df_v.iloc[0:4].sum()
+        mes_2 = df_v.iloc[4:8].sum()
 
-    def get_color(value):
-        return "#ffffff"
+        resultado[variedad] = [
+            {"MES": "Mes 1", "HW": round(mes_1["HW"], 2), "LSTM": round(mes_1["LSTM"], 2)},
+            {"MES": "Mes 2", "HW": round(mes_2["HW"], 2), "LSTM": round(mes_2["LSTM"], 2)},
+        ]
+
+    variedades = sorted(resultado.keys())
+    variedad_sel = request.args.get("variedad")
+
+    tabla_mensual = {}
+
+    if variedad_sel:
+        variedad_sel = variedad_sel.strip().upper()
+        if variedad_sel in resultado:
+            tabla_mensual = {variedad_sel: resultado[variedad_sel]}
 
     return render_template(
         "prediccion_tabla.html",
-        tabla_semanal=tabla_semanal,
-        get_color=get_color,
-        max_semana=ultima_semana_real
+        tabla_semanal=tabla_mensual,
+        variedades=variedades,
+        variedad_sel=variedad_sel
     )
 
-
 # ----------------------------
-# Prediccion - Tabla_dos     pantalla abajo 2  
+# PANTALLA ABAJO 2
 # ----------------------------
 @app.route('/prediccion_tabla_dos')
 def prediccion_tabla_dos():
     if 'usuario' not in session:
         return redirect(url_for('login'))
 
-    # === 1. Leer Excel principal y no filtrarlo todavía ===
-    df_original = pd.read_excel("produccion.xlsx")
-    # Columnas esperadas: AÑO | MES | SEMANA | COLOR | TIPO | VARIEDAD | TALLOS
+    # === VARIEDAD SELECCIONADA ===
+    variedad_sel = request.args.get("variedad")
 
-    # Crear columna FECHA en el dataframe original
+    df_original = pd.read_excel("produccion.xlsx")
+
     df_original["FECHA"] = pd.to_datetime(
         df_original["AÑO"].astype(str) + df_original["SEMANA"].astype(str) + "1",
         format="%G%V%w", errors="coerce"
     )
 
-    # Determinar última semana real antes de filtrar
     ultimo_año_real = df_original["AÑO"].max()
     ultima_semana_real = df_original[df_original["AÑO"] == ultimo_año_real]["SEMANA"].max()
 
-    # === 1b. Crear un DataFrame HISTÓRICO solo con años completos para entrenar ===
     semanas_por_año = df_original.groupby("AÑO")["SEMANA"].nunique()
     años_completos = semanas_por_año[semanas_por_año >= 52].index
     df_historico = df_original[df_original["AÑO"].isin(años_completos)].copy()
 
-    # Filtrar últimos 5 años completos en el histórico
     año_max_historico = df_historico["AÑO"].max()
     df_historico = df_historico[df_historico["AÑO"] >= año_max_historico - 5]
 
-    # === 2. Generar predicciones ===
     filas = []
 
-    # Iterar sobre las variedades del histórico
     for variedad in df_historico["VARIEDAD"].unique():
+
+        if variedad_sel and variedad != variedad_sel:
+            continue
 
         semana_actual_pred = ultima_semana_real + 1
         año_actual_pred = ultimo_año_real
-        semanas_a_generar = 8
 
-        for i in range(semanas_a_generar):
+        for _ in range(8):
 
-            semana_a_predecir = semana_actual_pred
-            año_a_predecir = año_actual_pred
+            semana = semana_actual_pred
+            año = año_actual_pred
 
-            # Si la semana supera 52, pasa al siguiente año
-            if semana_a_predecir > 52:
-                semana_a_predecir -= 52
-                año_a_predecir += 1
+            if semana > 52:
+                semana -= 52
+                año += 1
 
-            # Preparación de datos para modelos
             df_sem = df_historico[
                 (df_historico["VARIEDAD"] == variedad) &
-                (df_historico["SEMANA"] == semana_a_predecir)
+                (df_historico["SEMANA"] == semana)
             ]
 
-            serie_full = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
+            serie = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
 
-            serie_hw = serie_full[serie_full.index >= año_max_historico - 1]
-            serie_lstm = serie_full[serie_full.index >= año_max_historico - 2]
+            hw = round(serie.tail(2).mean(), 2) if len(serie) >= 2 else 0
+            lstm = round(serie.tail(3).mean(), 2) if len(serie) >= 3 else 0
 
-            if len(serie_full) < 3:
-                hw = 0
-                lstm = 0
-            else:
-                # Promedio simple (2 años)
-                try:
-                    hw = round(serie_hw.mean(), 2) if len(serie_hw) > 0 else 0
-                except:
-                    hw = 0
-
-                #  SE ELIMINA COMPLETAMENTE EL GRADIENT BOOSTING
-                # lr = None    # ya no se usa
-
-                # Reemplazo LSTM: promedio simple usando 3 años
-                try:
-                    lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
-                except:
-                    lstm = 0
-
-            #  SE ELIMINA TODO LO RELACIONADO CON DATOS REALES, DIFERENCIAS Y ACCURACY
-
-            filas.append([
-                variedad, año_a_predecir, semana_a_predecir, hw, lstm
-            ])
-
+            filas.append([variedad, año, semana, hw, lstm])
             semana_actual_pred += 1
 
-    # === TABLA 1: semana a semana por variedad ===
-    df_pred = pd.DataFrame(filas, columns=[
-        "VARIEDAD", "AÑO", "SEMANA", "HW", "LSTM"
-    ])
+    df_pred = pd.DataFrame(filas, columns=["VARIEDAD", "AÑO", "SEMANA", "HW", "LSTM"])
 
     tabla_semanal = {}
-    for variedad in df_pred["VARIEDAD"].unique():
-        tabla_semanal[variedad] = df_pred[df_pred["VARIEDAD"] == variedad] \
+    for v in df_pred["VARIEDAD"].unique():
+        tabla_semanal[v] = df_pred[df_pred["VARIEDAD"] == v] \
             .drop(columns="VARIEDAD") \
             .to_dict(orient="records")
 
-    # ORDENAR LAS TABLAS ALFABÉTICAMENTE POR NOMBRE DE VARIEDAD
     tabla_semanal = dict(sorted(tabla_semanal.items()))
 
-    def get_color(value):
-        return "#ffffff"
+    variedades = sorted(df_historico["VARIEDAD"].unique())
 
     return render_template(
         "prediccion_tabla_dos.html",
-        tabla_semanal=tabla_semanal,
-        get_color=get_color,
+        tabla_semanal=tabla_semanal if variedad_sel else {},
+        variedades=variedades,
+        variedad_sel=variedad_sel,
         max_semana=ultima_semana_real
     )
 
+
 # ----------------------------
-# Prediccion - grafica   PANTALLA 3 arriba
+# PANTALLA 3 ARRIBA
 # ----------------------------
 
 @app.route('/prediccion_grafica', methods=['GET', 'POST'])
@@ -470,16 +450,24 @@ def prediccion_grafica():
     if 'usuario' not in session:
         return redirect(url_for('login'))
 
-    # Selección de rango de semanas
-    limite_semanas = 53
+    import pandas as pd
+
+    # =============================
+    # 1. Selección de rango dinámico
+    # =============================
+    limite_semanas = 52
     rango_seleccionado = '1-52'
 
     if request.method == 'POST':
         rango_seleccionado = request.form.get('rango_semanas')
-        if rango_seleccionado == '1-27':
-            limite_semanas = 27
+        try:
+            limite_semanas = int(rango_seleccionado.split('-')[1])
+        except:
+            limite_semanas = 52
 
-    # === 1. Leer Excel principal (único archivo ahora) ===
+    # =============================
+    # 2. Leer Excel
+    # =============================
     try:
         df = pd.read_excel("produccion.xlsx")
     except FileNotFoundError as e:
@@ -490,41 +478,41 @@ def prediccion_grafica():
         format="%G%V%w",
         errors="coerce"
     )
+
     año_max = df["AÑO"].max()
     df = df[df["AÑO"] >= año_max - 5]
 
-    # === 2. Generar predicciones por variedad y semana ===
+    # =============================
+    # 3. Predicciones (SIN CAMBIOS)
+    # =============================
     filas = []
 
     for variedad in df["VARIEDAD"].unique():
-        for semana in range(1, limite_semanas):
+        for semana in range(1, limite_semanas + 1):
 
-            df_sem = df[(df["VARIEDAD"] == variedad) & (df["SEMANA"] == semana)]
-            serie_full = df_sem.sort_values("AÑO").set_index("AÑO")["TALLOS"].dropna()
+            df_sem = df[
+                (df["VARIEDAD"] == variedad) &
+                (df["SEMANA"] == semana)
+            ]
 
-            # Datos recientes
+            serie_full = (
+                df_sem.sort_values("AÑO")
+                .set_index("AÑO")["TALLOS"]
+                .dropna()
+            )
+
             serie_hw = serie_full[serie_full.index >= año_max - 1]
             serie_lstm = serie_full[serie_full.index >= año_max - 2]
 
-            # Predicciones finales
             if len(serie_full) < 3:
                 hw = 0
                 lstm = 0
             else:
-                try:
-                    hw = round(serie_hw.mean(), 2) if len(serie_hw) > 0 else 0
-                except:
-                    hw = 0
-
-                # LSTM → ahora es solamente un promedio simple
-                try:
-                    lstm = round(serie_lstm.mean(), 2)
-                except:
-                    lstm = 0
+                hw = round(serie_hw.mean(), 2) if len(serie_hw) > 0 else 0
+                lstm = round(serie_lstm.mean(), 2) if len(serie_lstm) > 0 else 0
 
             filas.append([variedad, semana, hw, lstm])
 
-    # === 3. DataFrame final ===
     df_pred = pd.DataFrame(filas, columns=["VARIEDAD", "SEMANA", "HW", "LSTM"])
 
     if df_pred.empty:
@@ -534,11 +522,10 @@ def prediccion_grafica():
             rango_actual=rango_seleccionado
         )
 
-    # ==============================================================================
-    # 4. TABLAS (SIN REAL, SIN DIFERENCIAS, SIN PORCENTAJES)
-    # ==============================================================================
+    # =============================
+    # 4. TABLAS (SIN CAMBIOS)
+    # =============================
 
-    # === Tabla 1: semana a semana por variedad ===
     tabla_semanal = {
         v: df_pred[df_pred["VARIEDAD"] == v]
             .drop(columns="VARIEDAD")
@@ -546,10 +533,8 @@ def prediccion_grafica():
         for v in df_pred["VARIEDAD"].unique()
     }
 
-    # Añadimos columna de bloque
     df_pred["BLOQUE"] = ((df_pred["SEMANA"] - 1) // 4) + 1
 
-    # === Tabla 2: sumas cada 4 semanas por variedad ===
     tabla_variedad_df = df_pred.groupby(["VARIEDAD", "BLOQUE"])[["HW", "LSTM"]].sum().reset_index()
     tabla_variedad = {
         v: tabla_variedad_df[tabla_variedad_df["VARIEDAD"] == v]
@@ -558,45 +543,29 @@ def prediccion_grafica():
         for v in tabla_variedad_df["VARIEDAD"].unique()
     }
 
-    # === Tabla 3: total por variedad ===
     tabla_total = df_pred.groupby("VARIEDAD")[["HW", "LSTM"]].sum().reset_index()
 
-    # === Tabla 4: total por tipo ===
     df_excel = pd.read_excel("produccion.xlsx")[["VARIEDAD", "TIPO", "COLOR"]].drop_duplicates()
     df_merge = df_pred.merge(df_excel, on="VARIEDAD", how="left")
+
     tabla_tipo = df_merge.groupby("TIPO")[["HW", "LSTM"]].sum().reset_index()
     tabla_tipo = tabla_tipo[tabla_tipo["TIPO"].isin(["COLORES", "ROJO"])]
 
-    # === Tabla 5: general semana a semana ===
     tabla_general_semanal = df_pred.groupby("SEMANA")[["HW", "LSTM"]].sum().reset_index()
-
-    # === Tabla 6: general por bloques ===
     tabla_general_bloques = df_pred.groupby("BLOQUE")[["HW", "LSTM"]].sum().reset_index()
 
-    # === Tabla 7: solo COLORES por bloques ===
     df_colores = df_merge[df_merge["TIPO"] == "COLORES"]
     tabla_general_colores = df_colores.groupby("BLOQUE")[["HW", "LSTM"]].sum().reset_index()
 
-    # === Tabla 8: total general ===
     tabla_general_total = pd.DataFrame([df_pred[["HW", "LSTM"]].sum().to_dict()])
-
-    # === Tabla 9: total por COLOR ===
     tabla_color_total = df_merge.groupby("COLOR")[["HW", "LSTM"]].sum().reset_index()
-
-    # === Tabla 10: por COLOR en bloques ===
     tabla_color_bloques = df_merge.groupby(["COLOR", "BLOQUE"])[["HW", "LSTM"]].sum().reset_index()
 
-    # Color de celdas (opcional)
     def get_color(value):
         return "#FFFFFF"
 
-    # === Determinar max_semana dinámicamente ===
-    try:
-        max_semana = int(df_pred["SEMANA"].max())
-    except:
-        max_semana = 0
+    max_semana = int(df_pred["SEMANA"].max())
 
-    # === Render ===
     return render_template(
         "prediccion_grafica.html",
         tabla_semanal=tabla_semanal,
@@ -615,7 +584,7 @@ def prediccion_grafica():
     )
 
 # ----------------------------
-# Resumen - dos    PANTALLA 8
+# PANTALLA 3 ABAJO
 # ----------------------------
 @app.route('/resumen_dos')
 def resumen_dos():
